@@ -40,7 +40,14 @@ VOLUME_RAW_DIR  = os.path.join(BASE_DIR, "..", "..", "data_collection", "traffic
 OUTPUT_DIR      = os.path.join(BASE_DIR, "..", "processed")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "synthetic_hourly.csv")
+CATEGORY_NAME = {
+    1: "expressway",
+    2: "major_arterial",
+    3: "arterial",
+    4: "minor_arterial",
+    5: "local_access",
+    6: "minor_access",
+}
 
 # =========================
 # ROAD CATEGORY PARAMETERS
@@ -389,9 +396,14 @@ output = grid[[
     "volume",
 ]].sort_values(["LinkID", "timestamp_hour"]).reset_index(drop=True)
 
-output.to_csv(OUTPUT_FILE, index=False)
-print(f"\nSaved synthetic dataset → {OUTPUT_FILE}")
-print(f"Rows: {len(output):,}  |  Columns: {list(output.columns)}")
+# Save one CSV per road category
+for cat, cat_df in output.groupby("RoadCategory"):
+    cat_label = CATEGORY_NAME.get(cat, f"category_{cat}")
+    out_path = os.path.join(OUTPUT_DIR, f"synthetic_hourly_cat{cat}_{cat_label}.csv")
+    cat_df.sort_values(["LinkID", "timestamp_hour"]).reset_index(drop=True).to_csv(out_path, index=False)
+    print(f"  Cat {cat} ({cat_label}): {len(cat_df):,} rows → {os.path.basename(out_path)}")
+
+print(f"\nTotal rows: {len(output):,}  |  Columns: {list(output.columns)}")
 print(f"Unique hours per day: {output['hour'].nunique()}")
 print(f"Unique dates: {output['timestamp_hour'].dt.date.nunique()}")
 print(f"Unique LinkIDs: {output['LinkID'].nunique():,}")

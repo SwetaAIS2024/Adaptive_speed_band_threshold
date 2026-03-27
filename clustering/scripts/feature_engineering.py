@@ -6,7 +6,9 @@ For each (RoadCategory x day_type) subset:
   - Binary-encode day_type: Weekday=0, Weekend=1
   - MinMax-normalise speed and volume *within the subset*
 
-Reads:  data/input/traffic_hourly.csv
+Reads (in order of preference):
+  1. Per-category CSVs: synthetic_dataset/processed/synthetic_hourly_cat*.csv
+  2. Single input file:  data/input/traffic_hourly.csv
 Writes: clustering/features/features_<cat>_<day>.parquet  (one file per subset)
         clustering/features/feature_metadata.json          (scaler params + row counts)
 """
@@ -17,6 +19,7 @@ import pandas as pd
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 
+SYNTHETIC_DIR = Path("synthetic_dataset/processed")
 INPUT_FILE = Path("data/input/traffic_hourly.csv")
 OUTPUT_DIR = Path("clustering/features")
 
@@ -41,12 +44,26 @@ def engineer_subset(subset: pd.DataFrame) -> tuple[pd.DataFrame, MinMaxScaler]:
     return df, scaler
 
 
-def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def load_input() -> pd.DataFrame:
+    """Load from per-category CSVs if available, otherwise fall back to single input file."""
+    cat_files = sorted(SYNTHETIC_DIR.glob("synthetic_hourly_cat*.csv"))
+    if cat_files:
+        print(f"Loading {len(cat_files)} per-category CSV(s) from {SYNTHETIC_DIR} ...")
+        frames = [pd.read_csv(f, parse_dates=["timestamp_hour"]) for f in cat_files]
+        df = pd.concat(frames, ignore_index=True)
+        print(f"  {len(df):,} rows loaded from {len(cat_files)} file(s)")
+        return df
 
     print(f"Loading {INPUT_FILE} ...")
     df = pd.read_csv(INPUT_FILE, parse_dates=["timestamp_hour"])
     print(f"  {len(df):,} rows loaded")
+    return df
+
+
+def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    df = load_input()
 
     missing = REQUIRED_COLS - set(df.columns)
     if missing:
