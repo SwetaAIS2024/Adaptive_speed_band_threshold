@@ -1,0 +1,102 @@
+"""
+Feature engineering for adaptive speed band clustering.
+
+For each (RoadCategory x day_type) subset:
+  - Cyclic-encode hour: sin(2πh/24), cos(2πh/24)
+  - Binary-encode day_type: Weekday=0, Weekend=1
+  - MinMax-normalise speed and volume *within the subset*
+
+Reads:  data/input/traffic_hourly.csv
+Writes: clustering/features/features_<cat>_<day>.parquet  (one file per subset)
+        clustering/features/feature_metadata.json          (scaler params + row counts)
+"""
+
+import json
+import numpy as np
+import pandas as pd
+from pathlib import Path
+from sklearn.preprocessing import MinMaxScaler
+
+INPUT_FILE = Path("data/input/traffic_hourly.csv")
+OUTPUT_DIR = Path("clustering/features")
+
+VALID_CATEGORIES = {1, 2, 3, 4, 5, 6}
+DAY_TYPES = ["Weekday", "Weekend"]
+
+CATEGORY_PREFIX = {1: "EXP", 2: "MJR", 3: "ART", 4: "MIN", 5: "LOC", 6: "ACC"}
+DAY_PREFIX = {"Weekday": "WD", "Weekend": "WE"}
+
+REQUIRED_COLS = {"LinkID", "RoadCategory", "hour", "day_type", "speed", "volume"}
+
+
+def engineer_subset(subset: pd.DataFrame) -> tuple[pd.DataFrame, MinMaxScaler]:
+    """Return feature-augmented dataframe and fitted scaler for one subset."""
+    df = subset.copy()
+    df["sin_h"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["cos_h"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["day_bin"] = (df["day_type"] == "Weekend").astype(int)
+
+    scaler = MinMaxScaler()
+    df[["speed_norm", "volume_norm"]] = scaler.fit_transform(df[["speed", "volume"]])
+    return df, scaler
+
+
+def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    print(f"Loading {INPUT_FILE} ...")
+    df = pd.read_csv(INPUT_FILE, parse_dates=["timestamp_hour"])
+    print(f"  {len(df):,} rows loaded")
+
+    missing = REQUIRED_COLS - set(df.columns)
+    if missing:
+        raise ValueError(f"Input dataset is missing columns: {missing}")
+
+    metadata = {}
+
+    for cat in sorted(df["RoadCategory"].unique()):
+        if cat not in VALID_CATEGORIES:
+            print(f"  [SKIP] RoadCategory={cat} not in valid set {VALID_CATEGORIES}")
+            continue
+
+        for day in DAY_TYPES:
+            subset = df[(df["RoadCategory"] == cat) & (df["day_type"] == day)]
+
+            if len(subset) == 0:
+                print(f"  [SKIP] Cat={cat} {day}: no rows")
+                continue
+
+            engineered, scaler = engineer_subset(subset)
+
+            feature_cols = ["sin_h", "cos_h", "day_bin", "speed_norm", "volume_norm"]
+            save_cols = [c for c in df.columns] + feature_cols
+            out_path = OUTPUT_DIR / f"features_{cat}_{day.lower()}.parquet"
+            engineered[save_cols].to_parquet(out_path, index=False)
+
+            key = f"{cat}_{day}"
+            metadata[key] = {
+                "road_category": int(cat),
+                "day_type": day,
+                "cat_prefix": CATEGORY_PREFIX.get(cat, f"C{cat}"),
+                "day_prefix": DAY_PREFIX[day],
+                "n_rows": len(subset),
+                "speed_min": float(subset["speed"].min()),
+                "speed_max": float(subset["speed"].max()),
+                "volume_min": float(subset["volume"].min()),
+                "volume_max": float(subset["volume"].max()),
+                "scaler_data_min": scaler.data_min_.tolist(),
+                "scaler_data_max": scaler.data_max_.tolist(),
+                "feature_file": str(out_path),
+            }
+            print(f"  Cat={cat} {day:8s}: {len(subset):>8,} rows → {out_path.name}")
+
+    meta_path = OUTPUT_DIR / "feature_metadata.json"
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    print(f"\nMetadata saved to {meta_path}")
+    print("Feature engineering complete.")
+
+
+if __name__ == "__main__":
+    main()
