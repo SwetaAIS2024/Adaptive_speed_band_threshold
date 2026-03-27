@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Generated data — too large for GitHub
+synthetic_dataset/processed/
+data_collection/speed_band/raw_datasets/
+data_collection/traffic_volume/raw_datasets/
+clustering/features/
+clustering/results/
+data/input/
+data/output/
