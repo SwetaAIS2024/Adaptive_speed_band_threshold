@@ -122,6 +122,9 @@ def main():
         summary_path = RESULTS_DIR / f"cluster_summary_{tag}.csv"
         bands.to_csv(summary_path, index=False)
 
+        # Per-LinkID validation (must run before bands are merged into df)
+        val = validate_linkids(df, bands)
+
         # Map bands back onto every row
         df = df.merge(
             bands[["cluster_id", "lower_band", "upper_band"]],
@@ -129,9 +132,6 @@ def main():
             how="left",
         )
         all_assignments.append(df)
-
-        # Per-LinkID validation
-        val = validate_linkids(df, bands)
         val["subset"] = tag
         all_validations.append(val)
 

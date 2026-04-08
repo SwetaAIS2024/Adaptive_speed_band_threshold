@@ -1,0 +1,145 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0" version="29.3.7">
+  <diagram name="Adaptive Speed Band Threshold Pipeline" id="ada-pipeline">
+    <mxGraphModel dx="2755" dy="1040" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="2" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=17;fontStyle=1;" value="Adaptive Speed Band Threshold — Data-Driven Clustering Pipeline" vertex="1">
+          <mxGeometry height="38" width="1000" x="150" y="18" as="geometry" />
+        </mxCell>
+        <mxCell id="3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;opacity=35;" value="" vertex="1">
+          <mxGeometry height="156" width="1254" x="-19" y="63" as="geometry" />
+        </mxCell>
+        <mxCell id="3a" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=12;fontStyle=1;fontColor=#1e4d78;" value="Phase 1 — Data Collection" vertex="1">
+          <mxGeometry height="22" width="270" x="75" y="66" as="geometry" />
+        </mxCell>
+        <mxCell id="4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="&lt;b&gt;LTA TrafficSpeedBands API&lt;/b&gt;&lt;br&gt;5-min live speed snapshots" vertex="1">
+          <mxGeometry height="52" width="205" x="85" y="91" as="geometry" />
+        </mxCell>
+        <mxCell id="5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="&lt;b&gt;dtm.py&lt;/b&gt;&lt;br&gt;Poll every 5 min &amp;times; 72 hrs&lt;br&gt;3&amp;times; retry + backoff" vertex="1">
+          <mxGeometry height="52" width="170" x="315" y="91" as="geometry" />
+        </mxCell>
+        <mxCell id="6" parent="1" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;boundedLbl=1;" value="&lt;b&gt;data_collection/speed_band/raw_datasets/&lt;/b&gt;&lt;br&gt;&lt;i&gt;speedbands_YYYYMMDD_HHMMSS.csv&lt;/i&gt;&lt;br&gt;(one file per poll)" vertex="1">
+          <mxGeometry height="62" width="215" x="510" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="&lt;b&gt;LTA TrafficFlow API&lt;/b&gt;&lt;br&gt;Monthly historical volume JSON" vertex="1">
+          <mxGeometry height="46" width="205" x="85" y="163" as="geometry" />
+        </mxCell>
+        <mxCell id="8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="&lt;b&gt;collect_traffic_flow.py&lt;/b&gt;&lt;br&gt;Retry + backoff, .json output" vertex="1">
+          <mxGeometry height="46" width="170" x="315" y="163" as="geometry" />
+        </mxCell>
+        <mxCell id="9" parent="1" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;boundedLbl=1;" value="&lt;b&gt;data_collection/traffic_volume/raw_datasets/&lt;/b&gt;&lt;br&gt;&lt;i&gt;traffic_flow_YYYYMMDD_HHMMSS.json&lt;/i&gt;" vertex="1">
+          <mxGeometry height="52" width="215" x="510" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="&lt;b&gt;Pre-process &amp;amp; Merge&lt;/b&gt;&lt;br&gt;Filter invalid records&lt;br&gt;UTC &amp;rarr; SGT, hourly aggregation&lt;br&gt;Join speed + volume by LinkID" vertex="1">
+          <mxGeometry height="110" width="195" x="780" y="89" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="4" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="5" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="7" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="8" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="6" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="9" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="11" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=12;fontStyle=1;fontColor=#006100;" value="Phase 2 — Clustering Pipeline" vertex="1">
+          <mxGeometry height="22" width="280" x="360" y="234" as="geometry" />
+        </mxCell>
+        <mxCell id="12" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=0;" value="&lt;b&gt;data/input/traffic_hourly.csv&lt;/b&gt;&lt;br&gt;timestamp_hour (SGT) | LinkID | RoadCategory | hour (0&amp;ndash;23) | day_type | speed (km/h) | volume (veh/hr)" vertex="1">
+          <mxGeometry height="62" width="460" x="360" y="258" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="10" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.7;entryY=0;entryDx=0;entryDy=0;" target="12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="13" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;spacingLeft=10;arcSize=5;" value="&lt;b&gt;Step 1 — feature_engineering.py&lt;/b&gt;&lt;br&gt;&lt;br&gt;&amp;bull; Cyclic encode hour: sin(2&amp;pi;h/24), cos(2&amp;pi;h/24)&lt;br&gt;&amp;bull; Binary encode day_type: Weekday = 0, Weekend = 1&lt;br&gt;&amp;bull; MinMax normalise speed and volume&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;(independently within each RoadCategory &amp;times; day_type subset)&lt;/i&gt;&lt;br&gt;&amp;bull; Feature vector: [ sin_h, cos_h, day_bin, speed_norm, vol_norm ]" vertex="1">
+          <mxGeometry height="148" width="460" x="360" y="376" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="12" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="14" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#888888;fontColor=#333333;fontSize=10;" value="&lt;b&gt;clustering/features/&lt;/b&gt;&lt;br&gt;features_&amp;lt;cat&amp;gt;_&amp;lt;day&amp;gt;.parquet &amp;nbsp;(&amp;times;12)&lt;br&gt;feature_metadata.json &amp;nbsp;(scaler params)" vertex="1">
+          <mxGeometry height="60" width="255" x="890" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="13" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="15" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;spacingLeft=10;arcSize=5;" value="&lt;b&gt;Step 2 — run_clustering.py&lt;/b&gt;&lt;br&gt;&lt;br&gt;&amp;bull; 12 independent runs: 6 RoadCategories &amp;times; 2 day_types&lt;br&gt;&amp;bull; K sweep K = 2..10, select optimal K by peak silhouette score&lt;br&gt;&amp;bull; K-Means fit (n_init = 10, random_state = 42)&lt;br&gt;&amp;bull; Merge clusters with size &amp;lt; 30 into nearest centroid&lt;br&gt;&amp;bull; Flag clusters: speed std &amp;gt; 15 km/h or IQR &amp;gt; 20 km/h&lt;br&gt;&amp;bull; Assign composite cluster_id &amp;nbsp;e.g. &amp;nbsp;&lt;i&gt;&amp;quot;EXP_WD_03&amp;quot;&lt;/i&gt;" vertex="1">
+          <mxGeometry height="180" width="460" x="360" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="13" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="16" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;arcSize=5;" value="&lt;b&gt;Cluster Quality Criteria&lt;/b&gt;&lt;br&gt;&lt;br&gt;✓ Size &amp;ge; 30 records&lt;br&gt;✓ Speed std &amp;le; 15 km/h&lt;br&gt;✓ Speed IQR (P75&amp;minus;P25) &amp;le; 20 km/h&lt;br&gt;✓ Silhouette score &amp;ge; 0.3&lt;br&gt;&lt;br&gt;Fail size &amp;rarr; merge into nearest cluster&lt;br&gt;Fail spread &amp;rarr; flag for review (increase K)" vertex="1">
+          <mxGeometry height="175" width="255" x="890" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="16" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;endArrow=open;endFill=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="17" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#888888;fontColor=#333333;fontSize=10;" value="&lt;b&gt;clustering/results/&lt;/b&gt;&lt;br&gt;assignments_&amp;lt;cat&amp;gt;_&amp;lt;day&amp;gt;.parquet &amp;nbsp;(&amp;times;12)&lt;br&gt;cluster_centers_&amp;lt;cat&amp;gt;_&amp;lt;day&amp;gt;.csv &amp;nbsp;(&amp;times;12)&lt;br&gt;elbow_silhouette_&amp;lt;cat&amp;gt;_&amp;lt;day&amp;gt;.csv &amp;nbsp;(&amp;times;12)" vertex="1">
+          <mxGeometry height="70" width="255" x="890" y="770" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="15" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="18" parent="1" style="shape=note;size=18;whiteSpace=wrap;html=1;fillColor=#fffacd;strokeColor=#d6b656;fontSize=10;align=center;" value="&lt;b&gt;12 Independent&lt;br&gt;Clustering Runs&lt;/b&gt;&lt;br&gt;&lt;br&gt;6 RoadCategories&lt;br&gt;&amp;times; 2 day_types&lt;br&gt;&lt;br&gt;EXP &amp;nbsp;MJR &amp;nbsp;ART&lt;br&gt;MIN &amp;nbsp;LOC &amp;nbsp;ACC&lt;br&gt;&amp;times; Weekday / Weekend" vertex="1">
+          <mxGeometry height="148" width="220" x="55" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="18" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;endArrow=open;endFill=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="19" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;spacingLeft=10;arcSize=5;" value="&lt;b&gt;Step 3 — extract_speed_bands.py&lt;/b&gt;&lt;br&gt;&lt;br&gt;&amp;bull; &lt;b&gt;Speed bands:&lt;/b&gt; lower_band = P10(speed), upper_band = P90(speed) per cluster&lt;br&gt;&amp;bull; &lt;b&gt;Medoid extraction:&lt;/b&gt; i* = argmin &amp;#8214;x&lt;sub&gt;i&lt;/sub&gt; &amp;minus; &amp;mu;&lt;sub&gt;c&lt;/sub&gt;&amp;#8214; &amp;nbsp;(actual record nearest centroid)&lt;br&gt;&amp;bull; &lt;b&gt;Per-LinkID validation:&lt;/b&gt; flag if mean speed deviates &amp;gt; 15 km/h&lt;br&gt;&amp;nbsp;&amp;nbsp;from cluster band midpoint &amp;nbsp;(spatial outlier diagnostic)&lt;br&gt;&amp;bull; Append cluster_id, lower_band, upper_band to original dataset" vertex="1">
+          <mxGeometry height="162" width="460" x="360" y="812" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="15" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="20" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#888888;fontColor=#333333;fontSize=10;" value="&lt;b&gt;clustering/results/&lt;/b&gt;&lt;br&gt;cluster_summary_&amp;lt;cat&amp;gt;_&amp;lt;day&amp;gt;.csv&lt;br&gt;cluster_medoids.csv&lt;br&gt;linkid_validation.csv" vertex="1">
+          <mxGeometry height="68" width="255" x="890" y="845" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="19" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="21" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;data/output/traffic_hourly_with_bands.csv&lt;/b&gt;&lt;br&gt;timestamp_hour &amp;nbsp;| LinkID | RoadCategory | hour | day_type | speed | volume&lt;br&gt;&lt;font color=&quot;#006100&quot;&gt;&lt;b&gt;+ cluster_id &amp;nbsp;| lower_band (P10 km/h) &amp;nbsp;| upper_band (P90 km/h)&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="460" x="360" y="1032" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" edge="1" parent="1" source="19" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="L0" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontStyle=1;" value="Legend:" vertex="1">
+          <mxGeometry height="27" width="70" x="60" y="1153" as="geometry" />
+        </mxCell>
+        <mxCell id="L1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" value="Processing Script" vertex="1">
+          <mxGeometry height="28" width="148" x="60" y="1176" as="geometry" />
+        </mxCell>
+        <mxCell id="L2" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="Input Data File" vertex="1">
+          <mxGeometry height="28" width="148" x="218" y="1176" as="geometry" />
+        </mxCell>
+        <mxCell id="L3" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="Output Dataset" vertex="1">
+          <mxGeometry height="28" width="148" x="376" y="1176" as="geometry" />
+        </mxCell>
+        <mxCell id="L4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#888888;fontColor=#333333;fontSize=10;" value="Artifacts / Diagnostics" vertex="1">
+          <mxGeometry height="28" width="148" x="534" y="1176" as="geometry" />
+        </mxCell>
+        <mxCell id="L5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="Quality / Validation" vertex="1">
+          <mxGeometry height="28" width="148" x="692" y="1176" as="geometry" />
+        </mxCell>
+        <mxCell id="L6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" value="External Processing" vertex="1">
+          <mxGeometry height="28" width="148" x="850" y="1176" as="geometry" />
+        </mxCell>
+        <mxCell id="L7" parent="1" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;boundedLbl=1;" value="Raw Data File" vertex="1">
+          <mxGeometry height="28" width="148" x="1008" y="1176" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
