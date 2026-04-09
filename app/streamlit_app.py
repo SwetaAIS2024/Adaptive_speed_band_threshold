@@ -58,6 +58,61 @@ def validate_schema(df: pd.DataFrame) -> list[str]:
     return errors
 
 
+def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Clean the input dataset before clustering.
+    Returns (cleaned_df, list_of_warning_strings).
+    """
+    warnings_out = []
+    n0 = len(df)
+
+    # 1. Drop nulls in required columns
+    df = df.dropna(subset=["LinkID", "RoadCategory", "hour", "day_type", "speed", "volume"])
+    dropped_nulls = n0 - len(df)
+    if dropped_nulls:
+        warnings_out.append(f"Dropped {dropped_nulls:,} rows with null values in required columns.")
+
+    # 2. Validate RoadCategory
+    before = len(df)
+    df = df[df["RoadCategory"].isin(VALID_CATEGORIES)]
+    dropped_cat = before - len(df)
+    if dropped_cat:
+        warnings_out.append(f"Dropped {dropped_cat:,} rows with invalid RoadCategory (not in 1–6).")
+
+    # 3. Validate hour range
+    before = len(df)
+    df = df[df["hour"].between(0, 23)]
+    dropped_hour = before - len(df)
+    if dropped_hour:
+        warnings_out.append(f"Dropped {dropped_hour:,} rows with hour outside 0–23.")
+
+    # 4. Validate day_type
+    before = len(df)
+    df = df[df["day_type"].isin(["Weekday", "Weekend"])]
+    dropped_day = before - len(df)
+    if dropped_day:
+        warnings_out.append(f"Dropped {dropped_day:,} rows with invalid day_type (expected Weekday / Weekend).")
+
+    # 5. Cap speed at road-category free-flow maximum (sentinel fix)
+    FREE_FLOW = {1: 90, 2: 70, 3: 65, 4: 65, 5: 65, 6: 65}
+    before_speeds = (df["speed"] > df["RoadCategory"].map(FREE_FLOW)).sum()
+    df["speed"] = df.apply(
+        lambda r: min(r["speed"], FREE_FLOW.get(int(r["RoadCategory"]), 90)), axis=1
+    )
+    if before_speeds:
+        warnings_out.append(f"Capped {int(before_speeds):,} speed values exceeding the road-category free-flow limit.")
+
+    # 6. Drop non-positive speeds / volumes
+    before = len(df)
+    df = df[(df["speed"] > 0) & (df["volume"] >= 0)]
+    dropped_neg = before - len(df)
+    if dropped_neg:
+        warnings_out.append(f"Dropped {dropped_neg:,} rows with non-positive speed or negative volume.")
+
+    df = df.reset_index(drop=True)
+    return df, warnings_out
+
+
 def engineer_features(subset: pd.DataFrame) -> pd.DataFrame:
     df = subset.copy()
     df["sin_h"] = np.sin(2 * np.pi * df["hour"] / 24)
@@ -129,17 +184,23 @@ with st.sidebar:
             if errors:
                 st.error("\n".join(errors))
             else:
+                df_upload, pp_warns = preprocess(df_upload)
                 st.session_state.df = df_upload
                 st.session_state.cluster_results = {}
                 st.success(f"Loaded {len(df_upload):,} rows")
+                for w in pp_warns:
+                    st.warning(f"⚠ {w}")
         except Exception as e:
             st.error(f"Could not read file: {e}")
     else:
         if st.session_state.df is None:
             default = load_default_dataset()
             if default is not None:
+                default, pp_warns = preprocess(default)
                 st.session_state.df = default
                 st.info(f"Using default dataset  ({len(default):,} rows)")
+                for w in pp_warns:
+                    st.warning(f"⚠ {w}")
             else:
                 st.warning("No dataset found. Upload a CSV to begin.")
 
@@ -696,17 +757,69 @@ with tab3:
         fig_heat.update_xaxes(dtick=1)
         st.plotly_chart(fig_heat, use_container_width=True)
 
-        # ── Export ────────────────────────────────────────────────────────
+        # ── Export — current subset ───────────────────────────────────────
         st.markdown("---")
+        st.subheader("Output Dataset")
+        st.caption(
+            "The original 7 columns with `cluster_id`, `lower_band` (P10), and `upper_band` (P90) appended. "
+            "Every row in the same cluster shares the same band values."
+        )
+
         export_df = res_df.merge(
             bands[["cluster_id", "lower_band", "upper_band"]], on="cluster_id", how="left"
         )
-        drop_cols = [c for c in FEATURE_COLS + ["cluster_raw"] if c in export_df.columns]
+        drop_cols = [c for c in FEATURE_COLS + ["cluster_raw", "day_bin", "sin_h", "cos_h",
+                                                  "speed_norm", "volume_norm"] if c in export_df.columns]
         export_df = export_df.drop(columns=drop_cols)
 
-        st.download_button(
-            "⬇  Download dataset with speed bands",
-            data=export_df.to_csv(index=False),
-            file_name=f"traffic_with_bands_{sel_key[0]}_{sel_key[1].lower()}.csv",
-            mime="text/csv",
+        # Ensure column order: original 7 + cluster_id, lower_band, upper_band
+        base_cols = [c for c in ["timestamp_hour", "LinkID", "RoadCategory", "hour",
+                                  "day_type", "speed", "volume"] if c in export_df.columns]
+        extra_cols = ["cluster_id", "lower_band", "upper_band"]
+        export_df = export_df[base_cols + extra_cols]
+
+        st.dataframe(export_df.head(200), use_container_width=True, height=260)
+
+        dl1, dl2 = st.columns(2)
+        with dl1:
+            st.download_button(
+                f"⬇  Download — {key_labels[sel_key]} (this subset)",
+                data=export_df.to_csv(index=False),
+                file_name=f"traffic_with_bands_cat{sel_key[0]}_{sel_key[1].lower()}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        # ── Export — all clustered subsets combined ───────────────────────
+        with dl2:
+            all_frames = []
+            for k, r in st.session_state.cluster_results.items():
+                b = (
+                    r.groupby("cluster_id")["speed"]
+                    .agg(lower_band=lambda x: round(x.quantile(0.10), 2),
+                         upper_band=lambda x: round(x.quantile(0.90), 2))
+                    .reset_index()
+                )
+                f = r.merge(b[["cluster_id", "lower_band", "upper_band"]], on="cluster_id", how="left")
+                drop = [c for c in FEATURE_COLS + ["cluster_raw", "day_bin", "sin_h", "cos_h",
+                                                     "speed_norm", "volume_norm"] if c in f.columns]
+                f = f.drop(columns=drop)
+                f = f[[c for c in base_cols if c in f.columns] + extra_cols]
+                all_frames.append(f)
+
+            combined = pd.concat(all_frames, ignore_index=True) if all_frames else export_df
+
+            n_subsets = len(st.session_state.cluster_results)
+            st.download_button(
+                f"⬇  Download — All {n_subsets} clustered subset(s) combined",
+                data=combined.to_csv(index=False),
+                file_name="traffic_with_bands_all.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        st.info(
+            f"**{len(combined):,} rows** across **{n_subsets}** subset(s) in combined output.  "
+            "Run clustering on additional Road Category / Day Type combinations in the "
+            "🔮 Clustering tab to include them here."
         )
