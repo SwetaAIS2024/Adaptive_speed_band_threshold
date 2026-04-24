@@ -385,7 +385,34 @@ grid["timestamp_hour"] = grid["timestamp_hour"].dt.tz_convert(SGT)
 grid["hour"]     = grid["timestamp_hour"].dt.hour
 grid["day_type"] = grid["weekday"].apply(lambda w: "Weekend" if w >= 5 else "Weekday")
 
-# Keep only PRD-specified columns
+# Keep only PRD-specified columns + optional feature columns
+# ─── Synthetic optional columns ──────────────────────────────────────────────
+# Assign per-LinkID so the same road segment always carries the same code.
+# expressway  : E1–E8, only for RoadCategory=1; NaN for all others
+# road_direction: D1/D2, one fixed direction per LinkID
+# source       : S1/S2/S3, random per row (simulates mixed data sources)
+
+link_ids = grid["LinkID"].unique()
+link_rng = np.random.default_rng(seed=99)
+
+expressway_codes = ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"]
+direction_codes  = ["D1", "D2"]
+source_codes     = ["S1", "S2", "S3"]
+
+# Per-LinkID assignments (consistent across rows)
+link_expressway = {
+    lid: link_rng.choice(expressway_codes) for lid in link_ids
+}
+link_direction = {
+    lid: link_rng.choice(direction_codes) for lid in link_ids
+}
+
+grid["expressway"]     = grid.apply(
+    lambda r: link_expressway[r["LinkID"]] if r["RoadCategory"] == 1 else np.nan, axis=1
+)
+grid["road_direction"] = grid["LinkID"].map(link_direction)
+grid["source"]         = link_rng.choice(source_codes, size=len(grid))
+
 output = grid[[
     "timestamp_hour",
     "LinkID",
@@ -394,6 +421,9 @@ output = grid[[
     "day_type",
     "speed",
     "volume",
+    "expressway",
+    "road_direction",
+    "source",
 ]].sort_values(["LinkID", "timestamp_hour"]).reset_index(drop=True)
 
 # Save one CSV per road category

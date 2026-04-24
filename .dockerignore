@@ -1,0 +1,12 @@
+# Data directories — generated at runtime, not committed
+data/input/
+data/output/
+clustering/features/
+clustering/results/
+data_collection/speed_band/raw_datasets/
+data_collection/traffic_volume/raw_datasets/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
