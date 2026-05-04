@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    image: adaptive-speed-band:latest
+    container_name: adaptive-speed-band
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount data directories so results written by the CLI scripts on the
+      # host are visible inside the container (and vice-versa).
+      - ./data:/app/data
+      - ./clustering/results:/app/clustering/results
+      - ./clustering/features:/app/clustering/features
+      - ./synthetic_dataset/processed:/app/synthetic_dataset/processed
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Pass your LTA API key if the data-collection scripts are also used:
+      # - LTA_ACCOUNT_KEY=${LTA_ACCOUNT_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

@@ -11,17 +11,25 @@ Run:
     streamlit run app/streamlit_app.py
 """
 
+import sys
 import warnings
 from pathlib import Path
+
+# Repo root on sys.path so clustering.pipeline is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from sklearn.cluster import KMeans
-from sklearn.metrics import davies_bouldin_score, silhouette_score
-from sklearn.preprocessing import MinMaxScaler
+
+from clustering.pipeline import (
+    VALID_CATEGORIES, CATEGORY_PREFIX, DAY_PREFIX, REQUIRED_COLS, FEATURE_COLS,
+    engineer_subset, sweep_k, pick_optimal_k, run_kmeans,
+    merge_small_clusters, build_cluster_id,
+    extract_bands,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -33,25 +41,31 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── Constants ───────────────────────────────────────────────────────────────
-REQUIRED_COLS = {"timestamp_hour", "LinkID", "RoadCategory", "hour", "day_type", "speed", "volume"}
-VALID_CATEGORIES = {
+# ─── App-only constants ───────────────────────────────────────────────────────
+REQUIRED_COLS_WITH_TS = REQUIRED_COLS | {"timestamp_hour"}
+
+CATEGORY_LABEL = {
     1: "Expressway", 2: "Major Arterial", 3: "Arterial",
     4: "Minor Arterial", 5: "Local Access", 6: "Minor Access",
 }
-CAT_PREFIX = {1: "EXP", 2: "MJR", 3: "ART", 4: "MIN", 5: "LOC", 6: "ACC"}
-DAY_PREFIX = {"Weekday": "WD", "Weekend": "WE"}
-FEATURE_COLS = ["sin_h", "cos_h", "day_bin", "speed_norm", "volume_norm"]
 
-# Max rows passed to K-sweep to keep it fast on large datasets
+EXPRESSWAY = {"E1": "BKE", "E2": "KJE", "E3": "SLE", "E4": "TPE", "E5": "AYE", "E6": "CTE", "E7": "ECP", "E8": "PIE"} 
+
+ROAD_DIRECTION = {"D1": "INBOUND", "D2": "OUTBOUND"}
+
+SOURCES = {"S1": "GPS", "S2": "Sensor", "S3": "Other"}
+
+# Actual column names for the optional future-dataset fields
+OPTIONAL_COLS = ["expressway", "road_direction", "source"]
+
+# Max rows passed to K-sweep to keep the UI responsive on large datasets
 K_SWEEP_SAMPLE = 50_000
-# Max scatter plot points
 SCATTER_SAMPLE = 8_000
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def validate_schema(df: pd.DataFrame) -> list[str]:
-    missing = REQUIRED_COLS - set(df.columns)
+    missing = (REQUIRED_COLS | {"timestamp_hour"}) - set(df.columns)
     errors = []
     if missing:
         errors.append(f"Missing columns: {', '.join(sorted(missing))}")
@@ -109,41 +123,39 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     if dropped_neg:
         warnings_out.append(f"Dropped {dropped_neg:,} rows with non-positive speed or negative volume.")
 
+    # 7. Validate optional columns when present (allow NaN, reject unrecognised codes)
+    _opt_valid = {
+        "expressway": set(EXPRESSWAY),
+        "road_direction": set(ROAD_DIRECTION),
+        "source": set(SOURCES),
+    }
+    for _col, _codes in _opt_valid.items():
+        if _col in df.columns:
+            before = len(df)
+            df = df[df[_col].isna() | df[_col].isin(_codes)]
+            dropped = before - len(df)
+            if dropped:
+                warnings_out.append(f"Dropped {dropped:,} rows with unrecognised '{_col}' code.")
+
     df = df.reset_index(drop=True)
     return df, warnings_out
 
 
-def engineer_features(subset: pd.DataFrame) -> pd.DataFrame:
-    df = subset.copy()
-    df["sin_h"] = np.sin(2 * np.pi * df["hour"] / 24)
-    df["cos_h"] = np.cos(2 * np.pi * df["hour"] / 24)
-    df["day_bin"] = (df["day_type"] == "Weekend").astype(int)
-    scaler = MinMaxScaler()
-    df[["speed_norm", "volume_norm"]] = scaler.fit_transform(df[["speed", "volume"]])
-    return df
+# ─── Streamlit cache wrappers around pipeline functions ──────────────────────
+# These are thin wrappers so Streamlit can cache results between reruns.
+# ALL computation logic lives in clustering/pipeline.py.
+
+@st.cache_data(show_spinner=False)
+def cached_k_sweep(X_bytes: bytes, n_rows: int, n_cols: int) -> pd.DataFrame:
+    X = np.frombuffer(X_bytes, dtype=np.float64).reshape(n_rows, n_cols)
+    return sweep_k(X)
 
 
 @st.cache_data(show_spinner=False)
-def cached_k_sweep(X_bytes: bytes, n_rows: int) -> pd.DataFrame:
-    """K-sweep cached by numpy array bytes fingerprint."""
-    X = np.frombuffer(X_bytes, dtype=np.float64).reshape(n_rows, len(FEATURE_COLS))
-    rows = []
-    for k in range(2, 11):
-        km = KMeans(n_clusters=k, random_state=42, n_init=10)
-        labels = km.fit_predict(X)
-        sample = min(10_000, len(X))
-        sil = silhouette_score(X, labels, sample_size=sample, random_state=42)
-        db = davies_bouldin_score(X, labels)
-        rows.append({"k": k, "inertia": round(km.inertia_, 2),
-                     "silhouette": round(sil, 4), "davies_bouldin": round(db, 4)})
-    return pd.DataFrame(rows)
-
-
-@st.cache_data(show_spinner=False)
-def cached_kmeans(X_bytes: bytes, n_rows: int, k: int) -> np.ndarray:
-    X = np.frombuffer(X_bytes, dtype=np.float64).reshape(n_rows, len(FEATURE_COLS))
-    km = KMeans(n_clusters=k, random_state=42, n_init=10)
-    return km.fit_predict(X)
+def cached_kmeans(X_bytes: bytes, n_rows: int, n_cols: int, k: int) -> tuple:
+    X = np.frombuffer(X_bytes, dtype=np.float64).reshape(n_rows, n_cols)
+    labels, centers = run_kmeans(X, k)
+    return labels, centers
 
 
 def load_default_dataset() -> pd.DataFrame | None:
@@ -216,7 +228,13 @@ with st.sidebar:
         "| `speed` | float (km/h) |\n"
         "| `volume` | int (veh/hr) |"
     )
-
+    st.markdown("**Optional columns**")
+    st.markdown(
+        "| Column | Codes |\n|--------|-------|\n"
+        "| `expressway` | E1\u2013E8 (BKE, KJE \u2026 PIE) |\n"
+        "| `road_direction` | D1 = INBOUND, D2 = OUTBOUND |\n"
+        "| `source` | S1 = GPS, S2 = Sensor, S3 = Other |"
+    )
 # ─── Gate ────────────────────────────────────────────────────────────────────
 if st.session_state.df is None:
     st.info("👈  Upload a dataset using the sidebar to get started.")
@@ -250,7 +268,7 @@ with tab1:
             "Road Category",
             options=sorted(df_main["RoadCategory"].unique()),
             default=sorted(df_main["RoadCategory"].unique()),
-            format_func=lambda x: f"{x} — {VALID_CATEGORIES.get(x, 'Unknown')}",
+            format_func=lambda x: f"{x} — {CATEGORY_LABEL.get(x, 'Unknown')}",
         )
     with f2:
         sel_days = st.multiselect(
@@ -266,6 +284,21 @@ with tab1:
         & df_main["day_type"].isin(sel_days)
         & df_main["hour"].between(*hour_range)
     ]
+
+    # Optional column filters — rendered only when the columns exist in the loaded dataset
+    _opt_present = [c for c in OPTIONAL_COLS if c in df_main.columns]
+    if _opt_present:
+        _opt_maps   = {"expressway": EXPRESSWAY, "road_direction": ROAD_DIRECTION, "source": SOURCES}
+        _opt_labels = {"expressway": "Expressway", "road_direction": "Road Direction", "source": "Source"}
+        _opt_cols_ui = st.columns(len(_opt_present))
+        for _i, _col in enumerate(_opt_present):
+            with _opt_cols_ui[_i]:
+                _opts = sorted(df_filtered[_col].dropna().unique())
+                _sel  = st.multiselect(
+                    _opt_labels[_col], options=_opts, default=_opts,
+                    format_func=lambda x, m=_opt_maps[_col]: m.get(x, x),
+                )
+                df_filtered = df_filtered[df_filtered[_col].isin(_sel)]
 
     st.caption(f"Showing {len(df_filtered):,} of {len(df_main):,} records")
     st.dataframe(df_filtered.head(5_000), use_container_width=True, height=300)
@@ -310,7 +343,7 @@ with tab1:
             .reset_index(name="count")
         )
         cat_counts["label"] = cat_counts["RoadCategory"].map(
-            lambda x: f"{x} — {VALID_CATEGORIES.get(x, '?')}"
+            lambda x: f"{x} — {CATEGORY_LABEL.get(x, '?')}"
         )
         fig_cat = px.bar(
             cat_counts, x="label", y="count",
@@ -327,7 +360,7 @@ with tab1:
             .median().reset_index()
         )
         hour_profile["Category"] = hour_profile["RoadCategory"].map(
-            lambda x: VALID_CATEGORIES.get(x, str(x))
+            lambda x: CATEGORY_LABEL.get(x, str(x))
         )
         fig_hspd = px.line(
             hour_profile, x="hour", y="speed", color="Category",
@@ -344,7 +377,7 @@ with tab1:
         df_filtered.sample(min(5_000, len(df_filtered)), random_state=42),
         x="volume", y="speed",
         color=df_filtered.sample(min(5_000, len(df_filtered)), random_state=42)["RoadCategory"]
-              .map(lambda x: VALID_CATEGORIES.get(x, str(x))),
+              .map(lambda x: CATEGORY_LABEL.get(x, str(x))),
         opacity=0.5,
         title="Speed vs Volume (sample of 5,000)",
         labels={"volume": "Volume (veh/hr)", "speed": "Speed (km/h)", "color": "Road Category"},
@@ -369,7 +402,7 @@ with tab2:
         avail_cats = sorted(df_main["RoadCategory"].unique())
         sel_cat = st.selectbox(
             "Road Category", avail_cats,
-            format_func=lambda x: f"{x} — {VALID_CATEGORIES.get(x, '?')}",
+            format_func=lambda x: f"{x} — {CATEGORY_LABEL.get(x, '?')}",
         )
     with ctrl2:
         avail_days = sorted(df_main["day_type"].unique())
@@ -387,15 +420,16 @@ with tab2:
         st.warning(f"No data for Category {sel_cat} — {sel_day}. Choose a different combination.")
     else:
         st.metric(
-            f"Subset  ·  Cat {sel_cat} ({VALID_CATEGORIES.get(sel_cat,'?')}) — {sel_day}",
+            f"Subset  ·  Cat {sel_cat} ({CATEGORY_LABEL.get(sel_cat,'?')}) — {sel_day}",
             f"{len(subset_df):,} records",
         )
 
         need_run = run_btn or subset_key not in st.session_state.cluster_results
 
         if need_run:
-            sub_eng = engineer_features(subset_df)
-            X_full = sub_eng[FEATURE_COLS].values.astype(np.float64)
+            sub_eng, _, active_feat_cols = engineer_subset(subset_df)
+            X_full = sub_eng[active_feat_cols].values.astype(np.float64)
+            n_feat_cols = len(active_feat_cols)
 
             # Sample for K-sweep speed
             if len(X_full) > K_SWEEP_SAMPLE:
@@ -406,9 +440,9 @@ with tab2:
                 X_sweep = X_full
 
             with st.spinner("Running K sweep (K = 2 … 10) …"):
-                diag = cached_k_sweep(X_sweep.tobytes(), len(X_sweep))
+                diag = cached_k_sweep(X_sweep.tobytes(), len(X_sweep), n_feat_cols)
 
-            best_k = int(diag.loc[diag["silhouette"].idxmax(), "k"])
+            best_k = pick_optimal_k(diag)
 
             # K-sweep chart
             fig_k = go.Figure()
@@ -428,7 +462,7 @@ with tab2:
                 annotation_font=dict(color="green", size=13),
             )
             fig_k.update_layout(
-                title=f"K Sweep — Cat {sel_cat} ({VALID_CATEGORIES.get(sel_cat,'?')}) {sel_day}",
+                title=f"K Sweep — Cat {sel_cat} ({CATEGORY_LABEL.get(sel_cat,'?')}) {sel_day}",
                 xaxis=dict(title="Number of Clusters (K)", dtick=1),
                 yaxis_title="Score",
                 height=340,
@@ -443,13 +477,15 @@ with tab2:
             )
 
             with st.spinner(f"Fitting K-Means  K = {k_final} on {len(X_full):,} records …"):
-                labels = cached_kmeans(X_full.tobytes(), len(X_full), k_final)
+                labels, centers = cached_kmeans(X_full.tobytes(), len(X_full), n_feat_cols, k_final)
 
-            cat_pfx = CAT_PREFIX.get(sel_cat, f"C{sel_cat}")
+            labels, centers = merge_small_clusters(labels, centers)
+
+            cat_pfx = CATEGORY_PREFIX.get(sel_cat, f"C{sel_cat}")
             day_pfx = DAY_PREFIX.get(sel_day, sel_day[:2].upper())
             sub_eng["cluster_raw"] = labels
             sub_eng["cluster_id"] = sub_eng["cluster_raw"].apply(
-                lambda i: f"{cat_pfx}_{day_pfx}_{i:02d}"
+                lambda i: build_cluster_id(cat_pfx, day_pfx, i)
             )
             st.session_state.cluster_results[subset_key] = sub_eng.copy()
 
@@ -502,20 +538,12 @@ with tab2:
 
             # ── Cluster profile table ──────────────────────────────────────
             st.markdown("---")
-            profile = (
-                sub_eng.groupby("cluster_id")["speed"]
-                .agg(
-                    cluster_size="count",
-                    mean=lambda x: round(x.mean(), 2),
-                    lower_band=lambda x: round(x.quantile(0.10), 2),
-                    upper_band=lambda x: round(x.quantile(0.90), 2),
-                    std=lambda x: round(x.std(), 2),
-                )
-                .reset_index()
-            )
+            profile = extract_bands(sub_eng).rename(columns={
+                "cluster_speed_mean": "mean", "cluster_speed_std": "std",
+            })
             profile["band_width"] = (profile["upper_band"] - profile["lower_band"]).round(2)
             profile["vol_mean"] = (
-                sub_eng.groupby("cluster_id")["volume"].mean().round(0).values
+                sub_eng.groupby("cluster_id")["volume"].mean().round(0).reindex(profile["cluster_id"]).values
             )
             profile = profile.sort_values("mean").reset_index(drop=True)
 
@@ -553,7 +581,7 @@ with tab3:
     else:
         result_keys = list(st.session_state.cluster_results.keys())
         key_labels = {
-            k: f"Cat {k[0]} ({VALID_CATEGORIES.get(k[0], '?')}) — {k[1]}"
+            k: f"Cat {k[0]} ({CATEGORY_LABEL.get(k[0], '?')}) — {k[1]}"
             for k in result_keys
         }
         sel_key = st.selectbox(
@@ -562,17 +590,10 @@ with tab3:
         )
         res_df = st.session_state.cluster_results[sel_key]
 
-        # Compute bands for this subset
+        # Compute bands using the shared pipeline function
         bands = (
-            res_df.groupby("cluster_id")["speed"]
-            .agg(
-                lower_band=lambda x: x.quantile(0.10),
-                upper_band=lambda x: x.quantile(0.90),
-                spd_mean="mean",
-                cluster_size="count",
-            )
-            .round(2)
-            .reset_index()
+            extract_bands(res_df)
+            .rename(columns={"cluster_speed_mean": "spd_mean"})
             .sort_values("spd_mean")
             .reset_index(drop=True)
         )
@@ -768,13 +789,14 @@ with tab3:
         export_df = res_df.merge(
             bands[["cluster_id", "lower_band", "upper_band"]], on="cluster_id", how="left"
         )
-        drop_cols = [c for c in FEATURE_COLS + ["cluster_raw", "day_bin", "sin_h", "cos_h",
-                                                  "speed_norm", "volume_norm"] if c in export_df.columns]
+        drop_cols = [c for c in export_df.columns
+                     if c in FEATURE_COLS or c.endswith("_enc")
+                     or c in ("cluster_raw", "day_bin", "sin_h", "cos_h", "speed_norm", "volume_norm")]
         export_df = export_df.drop(columns=drop_cols)
 
         # Ensure column order: original 7 + cluster_id, lower_band, upper_band
         base_cols = [c for c in ["timestamp_hour", "LinkID", "RoadCategory", "hour",
-                                  "day_type", "speed", "volume"] if c in export_df.columns]
+                                  "day_type", "speed", "volume"] + OPTIONAL_COLS if c in export_df.columns]
         extra_cols = ["cluster_id", "lower_band", "upper_band"]
         export_df = export_df[base_cols + extra_cols]
 
@@ -801,8 +823,9 @@ with tab3:
                     .reset_index()
                 )
                 f = r.merge(b[["cluster_id", "lower_band", "upper_band"]], on="cluster_id", how="left")
-                drop = [c for c in FEATURE_COLS + ["cluster_raw", "day_bin", "sin_h", "cos_h",
-                                                     "speed_norm", "volume_norm"] if c in f.columns]
+                drop = [c for c in f.columns
+                        if c in FEATURE_COLS or c.endswith("_enc")
+                        or c in ("cluster_raw", "day_bin", "sin_h", "cos_h", "speed_norm", "volume_norm")]
                 f = f.drop(columns=drop)
                 f = f[[c for c in base_cols if c in f.columns] + extra_cols]
                 all_frames.append(f)

@@ -16,117 +16,30 @@ Writes: clustering/results/elbow_silhouette_<cat>_<day>.csv   (K-sweep diagnosti
 """
 
 import json
+import sys
 import warnings
+from pathlib import Path
+
+# Allow running as a script from the repo root
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, davies_bouldin_score
+
+from clustering.pipeline import (
+    FEATURE_COLS, VALID_CATEGORIES, CATEGORY_PREFIX, DAY_PREFIX,
+    K_RANGE, MIN_CLUSTER_SIZE, MIN_SILHOUETTE,
+    sweep_k, pick_optimal_k, run_kmeans,
+    merge_small_clusters, flag_quality, build_cluster_id,
+)
 
 warnings.filterwarnings("ignore")
 
 FEATURES_DIR = Path("clustering/features")
 RESULTS_DIR = Path("clustering/results")
 
-K_RANGE = range(2, 11)
-MIN_CLUSTER_SIZE = 30
-MAX_SPEED_STD = 15.0
-MAX_SPEED_IQR = 20.0
-MIN_SILHOUETTE = 0.3
-
-FEATURE_COLS = ["sin_h", "cos_h", "day_bin", "speed_norm", "volume_norm"]
-KMEANS_RANDOM_STATE = 42
-KMEANS_N_INIT = 10
-
-
-def sweep_k(X: np.ndarray) -> pd.DataFrame:
-    """Run KMeans for every K in K_RANGE; return diagnostic dataframe."""
-    rows = []
-    for k in K_RANGE:
-        km = KMeans(n_clusters=k, random_state=KMEANS_RANDOM_STATE, n_init=KMEANS_N_INIT)
-        labels = km.fit_predict(X)
-        sample_size = min(10_000, len(X))
-        sil = silhouette_score(X, labels, sample_size=sample_size, random_state=KMEANS_RANDOM_STATE)
-        db = davies_bouldin_score(X, labels)
-        rows.append(
-            {
-                "k": k,
-                "inertia": round(km.inertia_, 2),
-                "silhouette": round(sil, 4),
-                "davies_bouldin": round(db, 4),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def pick_optimal_k(diag: pd.DataFrame) -> int:
-    """Select K with the highest silhouette score."""
-    return int(diag.loc[diag["silhouette"].idxmax(), "k"])
-
-
-def merge_small_clusters(
-    labels: np.ndarray,
-    centers: np.ndarray,
-    min_size: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Iteratively merge clusters below min_size into their nearest neighbour
-    (by centroid Euclidean distance). Re-indexes labels after each merge so
-    cluster indices are always contiguous starting from 0.
-    """
-    labels = labels.copy()
-    centers = centers.copy()
-
-    while True:
-        sizes = pd.Series(labels).value_counts()
-        small_ids = sizes[sizes < min_size].index.tolist()
-        if not small_ids:
-            break
-
-        target = small_ids[0]
-        target_center = centers[target]
-        dists = np.linalg.norm(centers - target_center, axis=1)
-        dists[target] = np.inf
-        nearest = int(np.argmin(dists))
-
-        labels[labels == target] = nearest
-
-        # Re-index to keep labels contiguous
-        unique = sorted(set(labels))
-        remap = {old: new for new, old in enumerate(unique)}
-        labels = np.array([remap[lbl] for lbl in labels])
-        centers = np.array([centers[old] for old in unique])
-
-    return labels, centers
-
-
-def flag_quality(df: pd.DataFrame) -> pd.DataFrame:
-    """Return per-cluster quality flags (speed std and IQR thresholds)."""
-    stats = (
-        df.groupby("cluster_raw")["speed"]
-        .agg(
-            cluster_size="count",
-            speed_std="std",
-            p25=lambda x: x.quantile(0.25),
-            p75=lambda x: x.quantile(0.75),
-        )
-        .reset_index()
-    )
-    stats["speed_iqr"] = stats["p75"] - stats["p25"]
-    stats["flag_size"] = stats["cluster_size"] < MIN_CLUSTER_SIZE
-    stats["flag_std"] = stats["speed_std"] > MAX_SPEED_STD
-    stats["flag_iqr"] = stats["speed_iqr"] > MAX_SPEED_IQR
-    return stats
-
-
-def build_cluster_id(cat_prefix: str, day_prefix: str, local_index: int) -> str:
-    return f"{cat_prefix}_{day_prefix}_{local_index:02d}"
-
 
 def main():
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    meta_path = FEATURES_DIR / "feature_metadata.json"
     if not meta_path.exists():
         raise FileNotFoundError(
             f"{meta_path} not found. Run feature_engineering.py first."
@@ -147,8 +60,9 @@ def main():
             continue
 
         df = pd.read_parquet(feat_file)
-        X = df[FEATURE_COLS].values
-        print(f"\nCat={cat} ({cat_prefix}) {day}: {len(df):,} rows")
+        active_cols = meta.get("active_cols", FEATURE_COLS)
+        X = df[active_cols].values
+        print(f"\nCat={cat} ({cat_prefix}) {day}: {len(df):,} rows, {len(active_cols)} features")
 
         # K sweep
         diag = sweep_k(X)
@@ -163,9 +77,8 @@ def main():
             print(f"  WARNING: silhouette {best_sil} < threshold {MIN_SILHOUETTE} — clusters may not be well-separated")
 
         # Final clustering at optimal K
-        km = KMeans(n_clusters=k_opt, random_state=KMEANS_RANDOM_STATE, n_init=KMEANS_N_INIT)
-        df["cluster_raw"] = km.fit_predict(X)
-        centers = km.cluster_centers_.copy()
+        labels, centers = run_kmeans(X, k_opt)
+        df["cluster_raw"] = labels
 
         # Merge clusters that are too small
         merged_labels, merged_centers = merge_small_clusters(df["cluster_raw"].values, centers, MIN_CLUSTER_SIZE)
@@ -187,7 +100,7 @@ def main():
         )
 
         # Save cluster centres
-        centers_df = pd.DataFrame(merged_centers, columns=FEATURE_COLS)
+        centers_df = pd.DataFrame(merged_centers, columns=active_cols)
         centers_df.insert(0, "cluster_raw", range(len(merged_centers)))
         centers_df["cluster_id"] = centers_df["cluster_raw"].apply(
             lambda idx: build_cluster_id(cat_prefix, day_prefix, idx)

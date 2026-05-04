@@ -14,34 +14,22 @@ Writes: clustering/features/features_<cat>_<day>.parquet  (one file per subset)
 """
 
 import json
-import numpy as np
-import pandas as pd
+import sys
 from pathlib import Path
-from sklearn.preprocessing import MinMaxScaler
+
+# Allow running as a script from the repo root
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+import pandas as pd
+from clustering.pipeline import (
+    VALID_CATEGORIES, DAY_TYPES, CATEGORY_PREFIX, DAY_PREFIX,
+    REQUIRED_COLS, FEATURE_COLS, engineer_subset,
+)
+
 
 SYNTHETIC_DIR = Path("synthetic_dataset/processed")
 INPUT_FILE = Path("data/input/traffic_hourly.csv")
 OUTPUT_DIR = Path("clustering/features")
-
-VALID_CATEGORIES = {1, 2, 3, 4, 5, 6}
-DAY_TYPES = ["Weekday", "Weekend"]
-
-CATEGORY_PREFIX = {1: "EXP", 2: "MJR", 3: "ART", 4: "MIN", 5: "LOC", 6: "ACC"}
-DAY_PREFIX = {"Weekday": "WD", "Weekend": "WE"}
-
-REQUIRED_COLS = {"LinkID", "RoadCategory", "hour", "day_type", "speed", "volume"}
-
-
-def engineer_subset(subset: pd.DataFrame) -> tuple[pd.DataFrame, MinMaxScaler]:
-    """Return feature-augmented dataframe and fitted scaler for one subset."""
-    df = subset.copy()
-    df["sin_h"] = np.sin(2 * np.pi * df["hour"] / 24)
-    df["cos_h"] = np.cos(2 * np.pi * df["hour"] / 24)
-    df["day_bin"] = (df["day_type"] == "Weekend").astype(int)
-
-    scaler = MinMaxScaler()
-    df[["speed_norm", "volume_norm"]] = scaler.fit_transform(df[["speed", "volume"]])
-    return df, scaler
 
 
 def load_input() -> pd.DataFrame:
@@ -83,10 +71,9 @@ def main():
                 print(f"  [SKIP] Cat={cat} {day}: no rows")
                 continue
 
-            engineered, scaler = engineer_subset(subset)
+            engineered, scaler, active_cols = engineer_subset(subset)
 
-            feature_cols = ["sin_h", "cos_h", "day_bin", "speed_norm", "volume_norm"]
-            save_cols = [c for c in df.columns] + feature_cols
+            save_cols = [c for c in df.columns] + active_cols
             out_path = OUTPUT_DIR / f"features_{cat}_{day.lower()}.parquet"
             engineered[save_cols].to_parquet(out_path, index=False)
 
@@ -103,9 +90,10 @@ def main():
                 "volume_max": float(subset["volume"].max()),
                 "scaler_data_min": scaler.data_min_.tolist(),
                 "scaler_data_max": scaler.data_max_.tolist(),
+                "active_cols": active_cols,
                 "feature_file": str(out_path),
             }
-            print(f"  Cat={cat} {day:8s}: {len(subset):>8,} rows → {out_path.name}")
+            print(f"  Cat={cat} {day:8s}: {len(subset):>8,} rows -> {out_path.name}")
 
     meta_path = OUTPUT_DIR / "feature_metadata.json"
     with open(meta_path, "w") as f:

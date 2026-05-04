@@ -17,76 +17,20 @@ Writes: data/output/traffic_hourly_with_bands.csv           (full dataset + clus
         clustering/results/linkid_validation.csv            (per-LinkID deviation report)
 """
 
-import numpy as np
-import pandas as pd
+import sys
 from pathlib import Path
+
+# Allow running as a script from the repo root
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+import pandas as pd
+
+from clustering.pipeline import (
+    FEATURE_COLS, extract_bands, extract_medoids, validate_linkids,
+)
 
 RESULTS_DIR = Path("clustering/results")
 OUTPUT_DIR = Path("data/output")
-
-FEATURE_COLS = ["sin_h", "cos_h", "day_bin", "speed_norm", "volume_norm"]
-LINKID_DEVIATION_THRESHOLD = 15.0  # km/h
-
-
-def extract_bands(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute P10/P90 speed bands per cluster_id."""
-    bands = (
-        df.groupby("cluster_id")["speed"]
-        .agg(
-            lower_band=lambda x: round(x.quantile(0.10), 2),
-            upper_band=lambda x: round(x.quantile(0.90), 2),
-            cluster_speed_mean=lambda x: round(x.mean(), 2),
-            cluster_speed_std=lambda x: round(x.std(), 2),
-            cluster_size="count",
-        )
-        .reset_index()
-    )
-    return bands
-
-
-def extract_medoids(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    For each cluster, find the actual record closest to the cluster centroid
-    in normalised feature space: i* = argmin ||x_i - mu_c||_2
-    """
-    medoids = []
-    for cluster_id, grp in df.groupby("cluster_id"):
-        X = grp[FEATURE_COLS].values
-        centroid = X.mean(axis=0)
-        nearest_idx = np.argmin(np.linalg.norm(X - centroid, axis=1))
-        row = grp.iloc[nearest_idx].copy()
-        row["is_medoid"] = True
-        medoids.append(row)
-    return pd.DataFrame(medoids)
-
-
-def validate_linkids(df: pd.DataFrame, bands: pd.DataFrame) -> pd.DataFrame:
-    """
-    Flag LinkIDs whose mean speed deviates more than LINKID_DEVIATION_THRESHOLD
-    from the cluster band midpoint.
-    """
-    merged = df.merge(
-        bands[["cluster_id", "lower_band", "upper_band"]],
-        on="cluster_id",
-        how="left",
-    )
-    merged["band_midpoint"] = (merged["lower_band"] + merged["upper_band"]) / 2
-
-    link_stats = (
-        merged.groupby(["cluster_id", "LinkID"])
-        .agg(
-            link_speed_mean=("speed", "mean"),
-            link_speed_std=("speed", "std"),
-            link_count=("speed", "count"),
-            band_midpoint=("band_midpoint", "first"),
-        )
-        .reset_index()
-    )
-    link_stats["deviation"] = (
-        (link_stats["link_speed_mean"] - link_stats["band_midpoint"]).abs().round(2)
-    )
-    link_stats["flagged"] = link_stats["deviation"] > LINKID_DEVIATION_THRESHOLD
-    return link_stats
 
 
 def main():
