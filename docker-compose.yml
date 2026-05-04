@@ -6,6 +6,8 @@ services:
     ports:
       - "8501:8501"
     volumes:
+      # Mount app/ so code changes apply without rebuilding the image
+      - ./app:/app/app
       # Mount data directories so results written by the CLI scripts on the
       # host are visible inside the container (and vice-versa).
       - ./data:/app/data
