@@ -21,7 +21,16 @@ if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
 from tabs.context import AppContext, build_context
-from tabs import tab_eda, tab_explorer, tab_feature_engineering, tab_clustering, tab_speed_bands, tab_threshold_viz
+from tabs import (
+    tab_eda,
+    tab_explorer,
+    tab_feature_engineering,
+    tab_clustering,
+    tab_speed_bands,
+    tab_volume_bands,
+    tab_threshold_viz,
+    tab_volume_threshold_viz,
+)
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -49,8 +58,8 @@ for _key, _default in [
 
 # ── Sidebar — branding only ───────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🚗 Speed Band Threshold")
-    st.caption("Data-driven adaptive speed bands for Singapore roads")
+    st.title("🚗  Adaptive Traffic Volume and Speed Congestion Thresholds Computation")
+    st.caption("Data-driven adaptive traffic volume and speed threshold bands computation using K-Means clustering, with an interactive Streamlit dashboard for exploration and visualization.")
     st.markdown("---")
     st.markdown(
         "**Tabs**\n"
@@ -58,18 +67,23 @@ with st.sidebar:
         "- 📋 **Data Explorer** — interactive filter, distributions, upload any CSV\n"
         "- ⚙️ **Feature Engineering** — encode & normalise features for clustering\n"
         "- 🔮 **Clustering** — run K-Means on speed / volume features\n"
-        "- 🎯 **Speed & Volume Bands** — derive P10/P90 bands from cluster results\n"
-        "- 📈 **Threshold Visualisation** — speed vs hour with adaptive P10 threshold line"
+        "- 🎯 **Speed Bands** — P10/P90 speed bands from speed clustering\n"
+        "- 📦 **Volume Bands** — P10/P90 volume bands from volume clustering\n"
+        "- 📈 **Speed Threshold Visualisation** — speed vs hour with adaptive P10 threshold\n"
+        "- 📊 **Volume Threshold Visualisation** — volume vs hour with adaptive P10 threshold"
     )
 
 # ── Tab layout ────────────────────────────────────────────────────────────────
-tab_eda_ui, tab_explorer_ui, tab_feat_eng_ui, tab_clustering_ui, tab_bands_ui, tab_thresh_ui = st.tabs([
+tab_eda_ui, tab_explorer_ui, tab_feat_eng_ui, tab_clustering_ui, \
+tab_speed_bands_ui, tab_vol_bands_ui, tab_thresh_ui, tab_vol_thresh_ui = st.tabs([
     "🔍  Data Quality & EDA",
     "📋  Data Explorer",
     "⚙️  Feature Engineering",
     "🔮  Clustering",
-    "🎯  Speed & Volume Bands",
-    "📈  Threshold Visualisation",
+    "🎯  Speed Bands",
+    "📦  Volume Bands",
+    "📈  Speed Threshold Visualisation",
+    "📊  Volume Threshold Visualisation",
 ])
 
 with tab_eda_ui:
@@ -84,8 +98,14 @@ with tab_feat_eng_ui:
 with tab_clustering_ui:
     tab_clustering.render(ctx)
 
-with tab_bands_ui:
+with tab_speed_bands_ui:
     tab_speed_bands.render(ctx)
+
+with tab_vol_bands_ui:
+    tab_volume_bands.render(ctx)
 
 with tab_thresh_ui:
     tab_threshold_viz.render(ctx)
+
+with tab_vol_thresh_ui:
+    tab_volume_threshold_viz.render(ctx)

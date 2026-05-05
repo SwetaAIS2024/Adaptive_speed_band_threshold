@@ -199,6 +199,16 @@ def render(ctx: AppContext) -> None:
     # ── Full EDA Report ───────────────────────────────────────────────────────
     st.markdown("---")
     st.subheader("Full EDA Report (Text)")
+
+    if st.button("📄  Generate / Refresh EDA Report", key="eda_gen_report"):
+        with st.spinner("Running EDA on raw files …"):
+            try:
+                out_path = ctx.eda_mod.generate_eda_report()
+                st.success(f"EDA report saved to `{out_path}`.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"EDA report generation failed: {exc}")
+
     if ctx.eda_report_path.exists():
         report_text = ctx.eda_report_path.read_text(encoding="utf-8")
         st.download_button(
@@ -210,7 +220,7 @@ def render(ctx: AppContext) -> None:
         with st.expander("View raw EDA report text"):
             st.code(report_text, language=None)
     else:
-        st.warning(
-            "`eda_report.txt` not found. "
-            "Run `python data/data_understanding_EDA.py` to generate it."
+        st.info(
+            "`eda_report.txt` not yet generated. "
+            "Click **Generate / Refresh EDA Report** above to create it."
         )

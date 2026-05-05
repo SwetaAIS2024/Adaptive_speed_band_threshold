@@ -441,10 +441,16 @@ def get_cross_comparison(files_dict: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-if __name__ == "__main__":
+def generate_eda_report() -> str:
+    """Write eda_report.txt and return the output path string."""
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(OUT_FILE, "w", encoding="utf-8") as f:
         sys.stdout = f
         run_eda()
     sys.stdout = sys.__stdout__
-    print(f"EDA report saved to: {OUT_FILE}")
+    return OUT_FILE
+
+
+if __name__ == "__main__":
+    out = generate_eda_report()
+    print(f"EDA report saved to: {out}")
