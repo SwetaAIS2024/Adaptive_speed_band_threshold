@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import pandas as pd
 
-from clustering.pipeline import (
+from clustering.scripts.pipeline import (
     FEATURE_COLS, extract_bands, extract_medoids, validate_linkids,
 )
 

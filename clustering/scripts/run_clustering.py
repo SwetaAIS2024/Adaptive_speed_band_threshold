@@ -28,17 +28,27 @@ Public API (imported by the Streamlit app):
   load_results(stem, clustering_type) → ClusterResult | None
 """
 
-import json
+import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
-from sklearn.metrics import davies_bouldin_score, silhouette_score
 
 warnings.filterwarnings("ignore")
+
+# Allow running as a script from the repo root (same pattern as extract_speed_bands.py)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from clustering.scripts.pipeline import (
+    K_RANGE,
+    MIN_SILHOUETTE,
+    merge_small_clusters,
+    pick_optimal_k,
+    run_kmeans,
+    sweep_k,
+)
 
 # ── Paths (all relative to repo root, resolved at import time) ────────────────
 _REPO_ROOT   = Path(__file__).resolve().parent.parent.parent
@@ -46,10 +56,8 @@ FEATURES_DIR = _REPO_ROOT / "clustering" / "features"
 RESULTS_DIR  = _REPO_ROOT / "clustering" / "results"
 
 # ── Clustering constants ──────────────────────────────────────────────────────
-K_RANGE          = range(2, 9)        # K = 2 … 8
 K_SWEEP_SAMPLE   = 50_000            # max rows for K-sweep
 MIN_CLUSTER_FRAC = 0.02              # merge clusters < 2 % of total
-MIN_SILHOUETTE   = 0.25              # warn below this
 
 # Fixed feature sets — column names match what feature_engineering.py produces
 _ALWAYS_FEATURES  = ["hour_sin", "hour_cos", "day_type"]
@@ -80,59 +88,6 @@ def discover_feature_files() -> dict[str, Path]:
     }
 
 
-# ── Low-level clustering helpers ──────────────────────────────────────────────
-
-def _sweep_k(X: np.ndarray) -> pd.DataFrame:
-    """Run K-Means for each K in K_RANGE; return diagnostics DataFrame."""
-    rows = []
-    for k in K_RANGE:
-        km = KMeans(n_clusters=k, random_state=42, n_init="auto")
-        labels = km.fit_predict(X)
-        if len(set(labels)) < 2:
-            continue
-        rows.append({
-            "k":              k,
-            "inertia":        round(km.inertia_, 4),
-            "silhouette":     round(silhouette_score(X, labels, sample_size=min(10_000, len(X)), random_state=42), 4),
-            "davies_bouldin": round(davies_bouldin_score(X, labels), 4),
-        })
-    return pd.DataFrame(rows)
-
-
-def _pick_k(diag: pd.DataFrame) -> int:
-    """Return K with the highest silhouette score."""
-    return int(diag.loc[diag["silhouette"].idxmax(), "k"])
-
-
-def _fit_kmeans(X: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
-    """Return (labels, centers)."""
-    km = KMeans(n_clusters=k, random_state=42, n_init="auto")
-    labels = km.fit_predict(X)
-    return labels, km.cluster_centers_
-
-
-def _merge_small(labels: np.ndarray, centers: np.ndarray, n_total: int) -> tuple[np.ndarray, np.ndarray]:
-    """Merge clusters whose size < MIN_CLUSTER_FRAC * n_total into nearest centroid."""
-    threshold = max(1, int(MIN_CLUSTER_FRAC * n_total))
-    unique, counts = np.unique(labels, return_counts=True)
-    small = {u for u, c in zip(unique, counts) if c < threshold}
-    if not small:
-        return labels, centers
-
-    new_labels = labels.copy()
-    for s in small:
-        dists = np.linalg.norm(centers - centers[s], axis=1)
-        dists[s] = np.inf
-        nearest = int(np.argmin(dists))
-        new_labels[new_labels == s] = nearest
-
-    # Re-compact label space
-    mapping = {old: new for new, old in enumerate(sorted(set(new_labels)))}
-    new_labels = np.array([mapping[l] for l in new_labels])
-    new_centers = np.array([centers[old] for old in sorted(set(labels) - small)])
-    return new_labels, new_centers
-
-
 # ── Public: run one clustering ────────────────────────────────────────────────
 
 def run_one(
@@ -145,6 +100,9 @@ def run_one(
 ) -> ClusterResult:
     """
     Cluster `df` on `feature_cols`, optionally save results.
+
+    Uses sweep_k, pick_optimal_k, run_kmeans, merge_small_clusters
+    from clustering.scripts.pipeline — no logic is duplicated here.
 
     Parameters
     ----------
@@ -167,10 +125,10 @@ def run_one(
         if len(X_all) > K_SWEEP_SAMPLE:
             rng = np.random.default_rng(42)
             X_sweep = X_all[rng.choice(len(X_all), K_SWEEP_SAMPLE, replace=False)]
-        diag = _sweep_k(X_sweep)
-        k_opt = _pick_k(diag)
+        diag  = sweep_k(X_sweep)
+        k_opt = pick_optimal_k(diag)
     else:
-        diag = pd.DataFrame(columns=["k", "inertia", "silhouette", "davies_bouldin"])
+        diag  = pd.DataFrame(columns=["k", "inertia", "silhouette", "davies_bouldin"])
         k_opt = k_override
 
     best_sil = (
@@ -181,9 +139,10 @@ def run_one(
     if not np.isnan(best_sil) and best_sil < MIN_SILHOUETTE:
         print(f"  WARNING [{stem}/{clustering_type}]: silhouette={best_sil:.3f} < {MIN_SILHOUETTE}")
 
-    # Final fit on all rows
-    labels, centers = _fit_kmeans(X_all, k_opt)
-    labels, centers = _merge_small(labels, centers, len(X_all))
+    # Final fit + merge small clusters (fraction-based threshold)
+    labels, centers = run_kmeans(X_all, k_opt)
+    min_size = max(1, int(MIN_CLUSTER_FRAC * len(X_all)))
+    labels, centers = merge_small_clusters(labels, centers, min_size=min_size)
     k_final = len(np.unique(labels))
     if k_final != k_opt:
         print(f"  [{stem}/{clustering_type}] K merged {k_opt} → {k_final}")
@@ -313,10 +272,6 @@ def main():
     print(summary_df.to_string(index=False))
     print(f"\nSummary saved → {summary_path}")
     print("Clustering complete.")
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":
