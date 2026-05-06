@@ -62,7 +62,7 @@ with st.sidebar:
     st.caption("Data-driven adaptive traffic volume and speed threshold bands computation using K-Means clustering, with an interactive Streamlit dashboard for exploration and visualization.")
     st.markdown("---")
 
-    @st.fragment(run_every=3)
+    @st.fragment(run_every=15)
     def _workflow_progress():
         ps = get_pipeline_state(ctx)
 
@@ -102,39 +102,24 @@ with st.sidebar:
 
     _workflow_progress()
 
-# ── Tab layout ────────────────────────────────────────────────────────────────
-tab_eda_ui, tab_explorer_ui, tab_feat_eng_ui, tab_clustering_ui, \
-tab_speed_bands_ui, tab_vol_bands_ui, tab_thresh_ui, tab_vol_thresh_ui = st.tabs([
-    "🔍  Data Quality & EDA",
-    "📋  Data Explorer",
-    "⚙️  Feature Engineering",
-    "🔮  Clustering",
-    "🎯  Speed Bands",
-    "📦  Volume Bands",
-    "📈  Speed Threshold Visualisation",
-    "📊  Volume Threshold Visualisation",
-])
+# ── Page layout ──────────────────────────────────────────────────────────────
+PAGES = {
+    "🔍  Data Quality & EDA": tab_eda.render,
+    "📋  Data Explorer": tab_explorer.render,
+    "⚙️  Feature Engineering": tab_feature_engineering.render,
+    "🔮  Clustering": tab_clustering.render,
+    "🎯  Speed Bands": tab_speed_bands.render,
+    "📦  Volume Bands": tab_volume_bands.render,
+    "📈  Speed Threshold Visualisation": tab_threshold_viz.render,
+    "📊  Volume Threshold Visualisation": tab_volume_threshold_viz.render,
+}
 
-with tab_eda_ui:
-    tab_eda.render(ctx)
+page = st.radio(
+    "Navigation",
+    list(PAGES.keys()),
+    horizontal=True,
+    label_visibility="collapsed",
+    key="active_page",
+)
 
-with tab_explorer_ui:
-    tab_explorer.render(ctx)
-
-with tab_feat_eng_ui:
-    tab_feature_engineering.render(ctx)
-
-with tab_clustering_ui:
-    tab_clustering.render(ctx)
-
-with tab_speed_bands_ui:
-    tab_speed_bands.render(ctx)
-
-with tab_vol_bands_ui:
-    tab_volume_bands.render(ctx)
-
-with tab_thresh_ui:
-    tab_threshold_viz.render(ctx)
-
-with tab_vol_thresh_ui:
-    tab_volume_threshold_viz.render(ctx)
+PAGES[page](ctx)

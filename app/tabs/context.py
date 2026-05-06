@@ -153,6 +153,35 @@ def enrich_with_clusters(
     return preproc
 
 
+def enriched_result_path(feature_stem: str, clustering_type: str, data_root: Path) -> Path:
+    """Path for persisted enriched clustering output."""
+    results_dir = data_root.parent / "clustering" / "results"
+    return results_dir / f"enriched_{feature_stem}_{clustering_type}.parquet"
+
+
+@st.cache_data(show_spinner=False)
+def load_enriched_result(path_str: str) -> Optional[pd.DataFrame]:
+    """Load a persisted enriched clustering output if present."""
+    path = Path(path_str)
+    if not path.exists():
+        return None
+    return pd.read_parquet(path)
+
+
+def persist_enriched_result(
+    enriched_df: pd.DataFrame,
+    feature_stem: str,
+    clustering_type: str,
+    data_root: Path,
+) -> Path:
+    """Persist enriched clustering output as parquet for fast reloads."""
+    path = enriched_result_path(feature_stem, clustering_type, data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    enriched_df.to_parquet(path, index=False)
+    load_enriched_result.clear()
+    return path
+
+
 def discover_preproc_files(ctx: AppContext) -> dict:
     """Return {display_name: abs_path_str} for preprocessed CSVs, skipping summary files."""
     if ctx.eda_mod is None:

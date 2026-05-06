@@ -11,7 +11,13 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from .context import AppContext, enrich_with_clusters
+from .context import (
+    AppContext,
+    enrich_with_clusters,
+    enriched_result_path,
+    load_enriched_result,
+    persist_enriched_result,
+)
 
 # ── Colour palette (one colour per cluster, cycles if K > 10) ─────────────────
 _CLUSTER_PALETTE = [
@@ -32,10 +38,10 @@ def discover_cluster_results(ctx: AppContext, ctype: str) -> dict:
     Return {display_stem: cache_key} for all available cluster results of
     the given type (``"speed"`` or ``"volume"``).
 
-    Sources checked in order:
-    1. ``st.session_state.cluster_results`` — run in the current session
-    2. Saved files on disk (``clustering/results/``) — loaded and cached
-       into session state so the Clustering tab metrics stay consistent.
+     Sources checked in order:
+     1. ``st.session_state.cluster_results`` — run in the current session
+     2. Saved files on disk (``clustering/results/``) — discovered by filename
+         only and loaded lazily when the user selects one.
     """
     found: dict[str, tuple] = {}
 
@@ -45,16 +51,30 @@ def discover_cluster_results(ctx: AppContext, ctype: str) -> dict:
             found[key[0]] = key   # stem → cache_key
 
     # ── 2. Disk (previous sessions) ───────────────────────────────────────────
-    if ctx.cl_mod:
-        for stem in ctx.cl_mod.discover_feature_files():
-            if stem not in found:
-                result = ctx.cl_mod.load_results(stem, ctype)
-                if result is not None:
-                    cache_key = (stem, ctype, None)
-                    st.session_state.setdefault("cluster_results", {})[cache_key] = result
-                    found[stem] = cache_key
+    results_dir = ctx.data_root.parent / "clustering" / "results"
+    suffix = f"_{ctype}.parquet"
+    for path in sorted(results_dir.glob(f"cluster_assignments_*{suffix}")):
+        stem = path.stem.removeprefix("cluster_assignments_").removesuffix(f"_{ctype}")
+        if stem not in found:
+            found[stem] = (stem, ctype, None)
 
     return found
+
+
+def get_cluster_result(ctx: AppContext, cache_key: tuple):
+    """Return a cluster result from session state or load it from disk lazily."""
+    result = st.session_state.get("cluster_results", {}).get(cache_key)
+    if result is not None:
+        return result
+
+    if ctx.cl_mod is None:
+        return None
+
+    stem, ctype, _ = cache_key
+    result = ctx.cl_mod.load_results(stem, ctype)
+    if result is not None:
+        st.session_state.setdefault("cluster_results", {})[cache_key] = result
+    return result
 
 
 def get_enriched_df(ctx: AppContext, cache_key: tuple) -> pd.DataFrame | None:
@@ -68,15 +88,23 @@ def get_enriched_df(ctx: AppContext, cache_key: tuple) -> pd.DataFrame | None:
     if enriched is not None:
         return enriched
 
+    stem, ctype, _ = cache_key
+    persisted_path = enriched_result_path(stem, ctype, ctx.data_root)
+    if persisted_path.exists():
+        enriched = load_enriched_result(str(persisted_path))
+        if enriched is not None:
+            st.session_state.setdefault("cluster_enriched", {})[cache_key] = enriched
+            return enriched
+
     # ── Build from result ─────────────────────────────────────────────────────
-    result = st.session_state.get("cluster_results", {}).get(cache_key)
+    result = get_cluster_result(ctx, cache_key)
     if result is None:
         return None
 
-    stem = cache_key[0]
     enriched = enrich_with_clusters(stem, result.assigned_df, ctx.data_root)
     if enriched is not None:
         st.session_state.setdefault("cluster_enriched", {})[cache_key] = enriched
+        persist_enriched_result(enriched, stem, ctype, ctx.data_root)
 
     return enriched
 
@@ -88,6 +116,7 @@ def compute_cluster_bands(
     value_col: str,
     hour_col: str,
     cluster_col: str = "cluster_label",
+    include_hourly: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute P10/P90 from cluster assignments (not from raw percentiles).
@@ -114,18 +143,23 @@ def compute_cluster_bands(
         .sort_values("cluster_label")
     )
 
-    hourly = (
-        df_filt.groupby([cluster_col, hour_col])[value_col]
-        .agg(
-            p10=lambda x: round(x.quantile(0.10), 2),
-            p90=lambda x: round(x.quantile(0.90), 2),
-            mean=lambda x: round(x.mean(), 2),
-            count="count",
+    if include_hourly:
+        hourly = (
+            df_filt.groupby([cluster_col, hour_col])[value_col]
+            .agg(
+                p10=lambda x: round(x.quantile(0.10), 2),
+                p90=lambda x: round(x.quantile(0.90), 2),
+                mean=lambda x: round(x.mean(), 2),
+                count="count",
+            )
+            .reset_index()
+            .rename(columns={cluster_col: "cluster_label"})
+            .sort_values(["cluster_label", hour_col])
         )
-        .reset_index()
-        .rename(columns={cluster_col: "cluster_label"})
-        .sort_values(["cluster_label", hour_col])
-    )
+    else:
+        hourly = pd.DataFrame(
+            columns=["cluster_label", hour_col, "p10", "p90", "mean", "count"]
+        )
 
     return overall, hourly
 

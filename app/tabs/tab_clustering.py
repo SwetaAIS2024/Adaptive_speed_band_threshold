@@ -16,6 +16,7 @@ from .context import (
     csv_stem_from_feature_stem,
     enrich_with_clusters,
     load_feature_metadata,
+    persist_enriched_result,
 )
 
 
@@ -99,9 +100,12 @@ def render(ctx: AppContext) -> None:
             st.error(f"No `{sel_ctype.upper()}` column found in this file.")
             return
         st.session_state.cluster_results[cache_key] = result
-        st.session_state.cluster_enriched[cache_key] = enrich_with_clusters(
+        enriched_df = enrich_with_clusters(
             sel_stem, result.assigned_df, ctx.data_root
         )
+        st.session_state.cluster_enriched[cache_key] = enriched_df
+        if enriched_df is not None:
+            persist_enriched_result(enriched_df, sel_stem, sel_ctype, ctx.data_root)
 
     if cache_key not in st.session_state.cluster_results:
         return

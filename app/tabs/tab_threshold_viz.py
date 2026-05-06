@@ -24,6 +24,7 @@ from ._threshold_shared import (
     compute_cluster_bands,
     compute_medoids,
     discover_cluster_results,
+    get_cluster_result,
     get_enriched_df,
 )
 
@@ -88,7 +89,7 @@ def render(ctx: AppContext) -> None:
         )
         return
 
-    result = st.session_state.get("cluster_results", {}).get(cache_key)
+    result = get_cluster_result(ctx, cache_key)
     if result:
         st.success(
             f"K = {result.k_opt}  |  "
@@ -97,6 +98,15 @@ def render(ctx: AppContext) -> None:
         )
 
     st.markdown("---")
+
+    # ── Trace toggles ─────────────────────────────────────────────────────────
+    st.markdown("**Show / hide traces**")
+    t1, t2, t3, t4, t5 = st.columns(5)
+    show_points  = t1.checkbox("Scatter points",     value=True,  key="thresh_t_pts")
+    show_p10     = t2.checkbox("P10 threshold",      value=True,  key="thresh_t_p10")
+    show_p90     = t3.checkbox("P90 upper band",     value=True,  key="thresh_t_p90")
+    show_mean    = t4.checkbox("Hourly mean",        value=False, key="thresh_t_mean")
+    show_medoids = t5.checkbox("Medoid markers",     value=True,  key="thresh_t_med")
 
     # ── Column detection ──────────────────────────────────────────────────────
     cols          = _detect_cols(df_raw, ctx)
@@ -184,19 +194,29 @@ def render(ctx: AppContext) -> None:
     n_pts = len(df_filt)
 
     # ── Compute cluster bands & medoids ───────────────────────────────────────
-    overall_bands, hourly_bands = compute_cluster_bands(
-        df_thresh, speed_col, hour_col, cluster_col
-    )
-    medoids_df = compute_medoids(df_filt, speed_col, hour_col, cluster_col)
+    bands_cache = st.session_state.setdefault("threshold_bands_cache", {})
+    band_cache_key = ("speed", cache_key, day_sel)
+    if band_cache_key not in bands_cache:
+        bands_cache[band_cache_key] = compute_cluster_bands(
+            df_thresh, speed_col, hour_col, cluster_col, include_hourly=False
+        )[0]
+    overall_bands = bands_cache[band_cache_key]
 
-    # ── Trace toggles ─────────────────────────────────────────────────────────
-    st.markdown("**Show / hide traces**")
-    t1, t2, t3, t4, t5 = st.columns(5)
-    show_points  = t1.checkbox("Scatter points",     value=True,  key="thresh_t_pts")
-    show_p10     = t2.checkbox("P10 threshold",      value=True,  key="thresh_t_p10")
-    show_p90     = t3.checkbox("P90 upper band",     value=True,  key="thresh_t_p90")
-    show_mean    = t4.checkbox("Hourly mean",        value=False, key="thresh_t_mean")
-    show_medoids = t5.checkbox("Medoid markers",     value=True,  key="thresh_t_med")
+    medoids_df = pd.DataFrame()
+    if show_medoids:
+        medoid_cache = st.session_state.setdefault("threshold_medoids_cache", {})
+        medoid_cache_key = (
+            "speed",
+            cache_key,
+            day_sel,
+            tuple(str(v) for v in road_sel),
+            tuple(str(v) for v in id_sel),
+        )
+        if medoid_cache_key not in medoid_cache:
+            medoid_cache[medoid_cache_key] = compute_medoids(
+                df_filt, speed_col, hour_col, cluster_col
+            )
+        medoids_df = medoid_cache[medoid_cache_key]
 
     # ── Build Plotly figure ───────────────────────────────────────────────────
     fig = go.Figure()

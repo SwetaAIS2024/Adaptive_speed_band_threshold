@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from .context import AppContext, get_pipeline_state
+from ._threshold_shared import discover_cluster_results, get_cluster_result, get_enriched_df
 
 
 def render(ctx: AppContext) -> None:
@@ -22,10 +23,7 @@ def render(ctx: AppContext) -> None:
         )
         return
 
-    volume_results = {
-        k: v for k, v in st.session_state.cluster_results.items()
-        if k[1] == "volume"
-    }
+    volume_results = discover_cluster_results(ctx, "volume")
 
     if not volume_results:
         st.info(
@@ -34,15 +32,21 @@ def render(ctx: AppContext) -> None:
         )
         return
 
-    sel_key = st.selectbox(
+    sel_stem = st.selectbox(
         "Select volume clustering result",
         list(volume_results.keys()),
-        format_func=lambda k: k[0],
     )
-    result = volume_results[sel_key]
+    if sel_stem is None:
+        return
+
+    cache_key = volume_results[sel_stem]
+    result = get_cluster_result(ctx, cache_key)
+    if result is None:
+        st.error("Could not load the saved clustering result.")
+        return
 
     # Prefer original-unit enriched DF; fall back to normalised feature DF
-    enriched_res = st.session_state.cluster_enriched.get(sel_key)
+    enriched_res = get_enriched_df(ctx, cache_key)
     if enriched_res is not None:
         res_df     = enriched_res
         ec_res     = ctx.eda_mod._detect_cols(res_df) if ctx.eda_mod else {}
@@ -87,7 +91,7 @@ def render(ctx: AppContext) -> None:
 
     colors    = px.colors.qualitative.Safe
     fig_bands = go.Figure()
-    for i, row in bands.iterrows():
+    for i, (_, row) in enumerate(bands.iterrows()):
         c   = colors[i % len(colors)]
         lbl = str(int(row["cluster_label"]))
         fig_bands.add_trace(go.Bar(
@@ -117,7 +121,7 @@ def render(ctx: AppContext) -> None:
         ))
 
     fig_bands.update_layout(
-        title=f"Volume Bands — {sel_key[0]}",
+        title=f"Volume Bands — {sel_stem}",
         xaxis=dict(title=f"Volume ({vol_unit})", gridcolor="#EEEEEE"),
         yaxis=dict(title="Cluster", categoryorder="array", categoryarray=ordered),
         barmode="overlay",
@@ -131,6 +135,8 @@ def render(ctx: AppContext) -> None:
     st.markdown("---")
     st.subheader("Cluster Deep-Dive")
     sel_cluster     = st.selectbox("Select cluster", bands["cluster_label"].tolist())
+    if sel_cluster is None:
+        return
     cluster_volumes = res_df[res_df["cluster_label"] == sel_cluster][volume_col]
     p10      = cluster_volumes.quantile(0.10)
     p90      = cluster_volumes.quantile(0.90)
@@ -193,7 +199,7 @@ def render(ctx: AppContext) -> None:
         y=volume_col,
         color=res_df["cluster_label"].astype(str),
         category_orders={"x": ordered},
-        title=f"Volume Box Plots — {sel_key[0]}",
+        title=f"Volume Box Plots — {sel_stem}",
         labels={"x": "Cluster", volume_col: f"Volume ({vol_unit})"},
         points=False,
     )
@@ -220,6 +226,6 @@ def render(ctx: AppContext) -> None:
     st.download_button(
         "⬇  Download with bands (CSV)",
         data=export_df.to_csv(index=False),
-        file_name=f"volume_bands_{sel_key[0]}.csv",
+        file_name=f"volume_bands_{sel_stem}.csv",
         mime="text/csv",
     )
