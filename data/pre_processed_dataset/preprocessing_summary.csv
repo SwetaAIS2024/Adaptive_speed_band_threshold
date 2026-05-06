@@ -1,5 +1,5 @@
 raw_file,rows_raw,rows_cleaned,rows_dropped,retention_%,output_file
-Speed graph sample data - weekday 20210113.csv,2262572,1130896,1131676,49.98,Speed graph sample data - weekday 20210113_cleaned.csv
-Speed graph sample data - weekend 20210110.csv,1954122,974616,979506,49.87,Speed graph sample data - weekend 20210110_cleaned.csv
-TIQ sample data - weekday 20220713.xlsx,406690,395280,11410,97.19,TIQ sample data - weekday 20220713_cleaned.csv
-TIQ sample data-  weekend 20220710.xlsx,405416,394538,10878,97.32,TIQ sample data-  weekend 20220710_cleaned.csv
+speed_1.csv,2262572,1130896,1131676,49.98,speed_1_cleaned.csv
+speed_2.csv,1954122,974616,979506,49.87,speed_2_cleaned.csv
+tq_1.xlsx,406690,395280,11410,97.19,tq_1_cleaned.csv
+tq_2.xlsx,405416,394538,10878,97.32,tq_2_cleaned.csv

@@ -8,11 +8,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from .context import AppContext
+from .context import AppContext, get_pipeline_state
 
 
 def render(ctx: AppContext) -> None:
     st.header("Volume Bands")
+
+    ps = get_pipeline_state(ctx)
+    if not ps["clustering_done"]:
+        st.info(
+            "🔒 **Step 3 not complete** — no clustering results found.  "
+            "Complete **Feature Engineering** (Step 2) then run **Clustering** (Step 3) first."
+        )
+        return
 
     volume_results = {
         k: v for k, v in st.session_state.cluster_results.items()

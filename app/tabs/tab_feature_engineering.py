@@ -10,11 +10,20 @@ import contextlib
 import pandas as pd
 import streamlit as st
 
-from .context import AppContext
+from .context import AppContext, get_pipeline_state
 
 
 def render(ctx: AppContext) -> None:
     st.header("Feature Engineering")
+
+    ps = get_pipeline_state(ctx)
+    if not ps["preproc_done"]:
+        st.warning(
+            "⚠️ **Step 1 not complete** — no preprocessed files found in "
+            "`data/pre_processed_dataset/`.  "
+            "Go to the **Data Quality & EDA** tab and run preprocessing first."
+        )
+        return
     st.caption(
         "Converts preprocessed CSVs in `data/pre_processed_dataset/` into "
         "parquet feature files in `clustering/features/`. "

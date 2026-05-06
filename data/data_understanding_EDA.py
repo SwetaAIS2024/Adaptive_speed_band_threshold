@@ -8,34 +8,44 @@ RAW_DIR = os.path.join(BASE_DIR, "raw_dataset")
 OUT_DIR = os.path.join(BASE_DIR, "pre_processed_dataset")
 OUT_FILE = os.path.join(OUT_DIR, "eda_report.txt")
 
-FILES = {
-    "TIQ_weekday": {
-        "path": os.path.join(RAW_DIR, "TIQ sample data - weekday 20220713.xlsx"),
-        "reader": "excel",
-        "day_type": "weekday",
-        "source": "TIQ",
-    },
-    "TIQ_weekend": {
-        "path": os.path.join(RAW_DIR, "TIQ sample data-  weekend 20220710.xlsx"),
-        "reader": "excel",
-        "day_type": "weekend",
-        "source": "TIQ",
-    },
-    "SpeedGraph_weekday": {
-        "path": os.path.join(RAW_DIR, "Speed graph sample data - weekday 20210113.csv"),
-        "reader": "csv",
-        "day_type": "weekday",
-        "source": "SpeedGraph",
-    },
-    "SpeedGraph_weekend": {
-        "path": os.path.join(RAW_DIR, "Speed graph sample data - weekend 20210110.csv"),
-        "reader": "csv",
-        "day_type": "weekend",
-        "source": "SpeedGraph",
-    },
-}
-
 SEPARATOR = "=" * 70
+
+
+def _infer_day_type(df: pd.DataFrame) -> str:
+    """
+    Infer 'weekday' or 'weekend' (or 'mixed') from the DATE_TIME column.
+    Mon–Fri = weekday, Sat–Sun = weekend.
+    Returns 'mixed' if both types are present, 'unknown' if no datetime column.
+    """
+    dt_col = next((c for c in df.columns if "date" in c.lower() or "time" in c.lower()), None)
+    if dt_col is None:
+        return "unknown"
+    parsed = pd.to_datetime(df[dt_col], errors="coerce").dropna()
+    if parsed.empty:
+        return "unknown"
+    is_weekend = parsed.dt.dayofweek >= 5
+    has_weekday = (~is_weekend).any()
+    has_weekend = is_weekend.any()
+    if has_weekday and has_weekend:
+        return "mixed"
+    return "weekend" if has_weekend else "weekday"
+
+
+def _discover_files() -> dict:
+    """
+    Dynamically build a FILES-like dict from whatever is in raw_dataset/.
+    Returns {stem: {path, reader, day_type, source}} — no hardcoded names.
+    """
+    import glob as _g
+    files = {}
+    for pattern in ("*.csv", "*.xlsx", "*.xls"):
+        for p in sorted(_g.glob(os.path.join(RAW_DIR, pattern))):
+            fname = os.path.basename(p)
+            stem = os.path.splitext(fname)[0]
+            ext = os.path.splitext(fname)[1].lower()
+            reader = "excel" if ext in (".xlsx", ".xls") else "csv"
+            files[stem] = {"path": p, "reader": reader, "day_type": None, "source": stem}
+    return files
 
 
 def load_file(meta: dict) -> pd.DataFrame:
@@ -43,6 +53,16 @@ def load_file(meta: dict) -> pd.DataFrame:
         df = pd.read_excel(meta["path"])
     else:
         df = pd.read_csv(meta["path"])
+    # Normalise column names
+    df.columns = df.columns.str.strip().str.strip('"').str.strip("'")
+    return df
+
+
+def _load_file_with_daytype(meta: dict) -> tuple:
+    """Load file and resolve day_type from actual DATE_TIME data."""
+    df = load_file(meta)
+    day_type = _infer_day_type(df)
+    return df, day_type
     # Normalize column names: strip whitespace and surrounding quotes
     df.columns = df.columns.str.strip().str.strip('"').str.strip("'")
     return df
@@ -194,29 +214,31 @@ def general_statistics(name: str, df: pd.DataFrame):
 
 
 def cross_dataset_comparison():
-    section("5. CROSS-DATASET COMPARISON (TIQ vs SpeedGraph | Weekday vs Weekend)")
+    section("5. CROSS-DATASET COMPARISON")
+
+    files = _discover_files()
+    if not files:
+        print("  No raw files found.")
+        return
 
     summaries = []
-    for name, meta in FILES.items():
-        df = load_file(meta)
-        if "DATE_TIME" in df.columns:
-            parsed_dt = pd.to_datetime(df["DATE_TIME"], errors="coerce")
-            date_min = str(parsed_dt.min())
-            date_max = str(parsed_dt.max())
-        else:
-            date_min = date_max = "N/A"
+    for name, meta in files.items():
+        df, day_type = _load_file_with_daytype(meta)
+        dc = _detect_cols(df)
+        parsed_dt = pd.to_datetime(df[dc["dt"]], errors="coerce") if dc["dt"] else None
+        date_min = str(parsed_dt.min()) if parsed_dt is not None else "N/A"
+        date_max = str(parsed_dt.max()) if parsed_dt is not None else "N/A"
         row = {
             "dataset": name,
-            "source": meta["source"],
-            "day_type": meta["day_type"],
+            "day_type": day_type,
             "rows": len(df),
             "columns": list(df.columns),
             "null_total": int(df.isnull().sum().sum()),
             "duplicates": int(df.duplicated().sum()),
-            "mean_speed": round(df["SPEED"].mean(), 2) if "SPEED" in df.columns else None,
-            "min_speed": df["SPEED"].min() if "SPEED" in df.columns else None,
-            "max_speed": df["SPEED"].max() if "SPEED" in df.columns else None,
-            "mean_volume": round(df["VOLUME"].mean(), 2) if "VOLUME" in df.columns else None,
+            "mean_speed": round(df[dc["speed"]].mean(), 2) if dc["speed"] else None,
+            "min_speed": df[dc["speed"]].min() if dc["speed"] else None,
+            "max_speed": df[dc["speed"]].max() if dc["speed"] else None,
+            "mean_volume": round(df[dc["volume"]].mean(), 2) if dc["volume"] else None,
             "date_min": date_min,
             "date_max": date_max,
         }
@@ -227,14 +249,18 @@ def cross_dataset_comparison():
 
 
 def run_eda():
-    for name, meta in FILES.items():
+    files = _discover_files()
+    if not files:
+        print("No raw files found in raw_dataset/. Add files and retry.")
+        return
+
+    for name, meta in files.items():
+        df, day_type = _load_file_with_daytype(meta)
         print(f"\n{'#' * 70}")
         print(f"  DATASET: {name}")
-        print(f"  Source : {meta['source']}  |  Day Type: {meta['day_type']}")
+        print(f"  Day Type (inferred from DATE_TIME): {day_type}")
         print(f"  File   : {os.path.basename(meta['path'])}")
         print(f"{'#' * 70}")
-
-        df = load_file(meta)
 
         explore_features(name, df)
         check_data_quality(name, df)

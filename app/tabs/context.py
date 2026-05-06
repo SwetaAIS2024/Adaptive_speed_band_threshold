@@ -165,3 +165,45 @@ def discover_preproc_files(ctx: AppContext) -> dict:
         for name, path in all_files.items()
         if os.path.basename(path) not in ctx.skip_files
     }
+
+
+# ── Pipeline state helper ─────────────────────────────────────────────────────
+
+def get_pipeline_state(ctx: AppContext) -> dict:
+    """
+    Scan the filesystem and return a dict describing which pipeline steps
+    are complete. This is intentionally cheap (glob only, no file reads).
+
+    Keys
+    ----
+    preproc_done   : bool  — at least one *_cleaned.csv in pre_processed_dataset/
+    features_done  : bool  — at least one *.parquet in clustering/features/
+    clustering_done: bool  — at least one cluster_assignments_*.parquet in clustering/results/
+    preproc_count  : int   — number of preprocessed CSVs found
+    features_count : int   — number of feature parquets found
+    cluster_count  : int   — number of assignment parquets found
+    """
+    preproc_dir  = ctx.data_root / "pre_processed_dataset"
+    features_dir = ctx.data_root.parent / "clustering" / "features"
+    results_dir  = ctx.data_root.parent / "clustering" / "results"
+
+    preproc_files  = [
+        f for f in preproc_dir.glob("*.csv")
+        if f.name not in ctx.skip_files and f.name != "preprocessing_summary.csv"
+    ]
+    feature_files  = list(features_dir.glob("*.parquet"))
+    cluster_files  = list(results_dir.glob("cluster_assignments_*.parquet"))
+
+    # Also count results that exist only in the current session (not yet on disk)
+    session_cluster_count = len(st.session_state.get("cluster_results", {}))
+
+    total_cluster_count = len(cluster_files) + session_cluster_count
+
+    return {
+        "preproc_done":    len(preproc_files) > 0,
+        "features_done":   len(feature_files) > 0,
+        "clustering_done": total_cluster_count > 0,
+        "preproc_count":   len(preproc_files),
+        "features_count":  len(feature_files),
+        "cluster_count":   total_cluster_count,
+    }

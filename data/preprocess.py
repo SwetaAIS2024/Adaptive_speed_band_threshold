@@ -146,16 +146,15 @@ def preprocess_file(raw_path: str) -> tuple[pd.DataFrame, dict]:
         df["date"] = df[dt_col].dt.date
         report["fixes"].append(f"Parsed {dt_col} to datetime; added 'hour' and 'date' columns")
 
-    # 8. Add day_type derived from the source filename
-    fname_lower = os.path.basename(raw_path).lower()
-    if "weekday" in fname_lower:
-        day_type_val = "Weekday"
-    elif "weekend" in fname_lower:
-        day_type_val = "Weekend"
+    # 8. Add day_type from the 'date' column created in step 7
+    #    dayofweek: 0 (Mon)–4 (Fri) = Weekday, 5 (Sat)–6 (Sun) = Weekend
+    if "date" in df.columns:
+        dates = pd.to_datetime(df["date"], errors="coerce")
+        df["day_type"] = np.where(dates.dt.dayofweek < 5, "Weekday", "Weekend")
+        report["fixes"].append("Added 'day_type' inferred from DATE_TIME (Mon-Fri=Weekday, Sat-Sun=Weekend)")
     else:
-        day_type_val = "Unknown"
-    df["day_type"] = day_type_val
-    report["fixes"].append(f"Added 'day_type' = '{day_type_val}' (derived from filename)")
+        df["day_type"] = "Unknown"
+        report["fixes"].append("Added 'day_type' = 'Unknown' (no DATE_TIME column to infer from)")
 
     report["rows_out"] = len(df)
     report["dropped_total"] = report["rows_in"] - len(df)

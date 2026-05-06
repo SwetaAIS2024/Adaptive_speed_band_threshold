@@ -67,6 +67,8 @@ def render(ctx: AppContext) -> None:
                     buf = io.StringIO()
                     with contextlib.redirect_stdout(buf):
                         ctx.preproc_mod.run_preprocessing()
+                    # Clear file cache so updated preprocessed files are loaded fresh
+                    _load_raw_cached.clear()
                     st.success("Preprocessing complete. Preprocessed files are ready in `data/pre_processed_dataset/`.")
                     log_text = buf.getvalue()
                     if log_text:

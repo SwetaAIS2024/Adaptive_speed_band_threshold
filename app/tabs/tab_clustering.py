@@ -12,6 +12,7 @@ import streamlit as st
 
 from .context import (
     AppContext,
+    get_pipeline_state,
     csv_stem_from_feature_stem,
     enrich_with_clusters,
     load_feature_metadata,
@@ -29,11 +30,21 @@ def _run_clustering(cl_mod, stem, path_str, clustering_type, k_override):
     fcols = cl_mod.feature_cols_for(df, clustering_type)
     if not fcols:
         return None
-    return cl_mod.run_one(df, fcols, stem, clustering_type, k_override=k_override, save=False)
+    return cl_mod.run_one(df, fcols, stem, clustering_type, k_override=k_override, save=True)
 
 
 def render(ctx: AppContext) -> None:
     st.header("Clustering")
+
+    ps = get_pipeline_state(ctx)
+    if not ps["features_done"]:
+        st.warning(
+            "⚠️ **Step 2 not complete** — no feature parquet files found in "
+            "`clustering/features/`.  "
+            "Go to the **Feature Engineering** tab and run it first."
+        )
+        return
+
     st.caption(
         "Select a feature file and clustering type, then run clustering. "
         "Speed and Volume are clustered separately. "
